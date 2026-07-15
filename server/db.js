@@ -1,5 +1,6 @@
 import fs from 'fs'
 import path from 'path'
+import {randomBytes, scryptSync, timingSafeEqual} from 'crypto'
 import Database from 'better-sqlite3'
 
 const DB_REL = path.join('data', 'dewu.sqlite')
@@ -52,11 +53,66 @@ export function openDb(root) {
       mtime_ms REAL NOT NULL,
       PRIMARY KEY (kind, path)
     );
+
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `)
+
+  ensureDefaultAdmin(db)
 
   cachedDb = db
   cachedRoot = root
   return db
+}
+
+const DEFAULT_ADMIN_USER = 'admin'
+const DEFAULT_ADMIN_PASS = 'KCktBkww4tGFXpSX'
+
+/**
+ * password_hash format: saltHex:hashHex (scrypt)
+ * @param {string} password
+ */
+export function hashPassword(password) {
+  const salt = randomBytes(16).toString('hex')
+  const hash = scryptSync(String(password), salt, 64).toString('hex')
+  return `${salt}:${hash}`
+}
+
+/**
+ * @param {string} password
+ * @param {string} stored
+ */
+export function verifyPassword(password, stored) {
+  const [salt, hash] = String(stored || '').split(':')
+  if (!salt || !hash) return false
+  const expected = Buffer.from(hash, 'hex')
+  const actual = scryptSync(String(password), salt, 64)
+  if (expected.length !== actual.length) return false
+  return timingSafeEqual(expected, actual)
+}
+
+/**
+ * @param {import('better-sqlite3').Database} db
+ */
+function ensureDefaultAdmin(db) {
+  const row = db.prepare('SELECT id FROM users WHERE username = ?').get(DEFAULT_ADMIN_USER)
+  if (row) return
+  db.prepare('INSERT INTO users (username, password_hash) VALUES (?, ?)').run(
+    DEFAULT_ADMIN_USER,
+    hashPassword(DEFAULT_ADMIN_PASS),
+  )
+}
+
+/**
+ * @param {import('better-sqlite3').Database} db
+ * @param {string} username
+ */
+export function findUserByUsername(db, username) {
+  return db.prepare('SELECT id, username, password_hash FROM users WHERE username = ?').get(String(username || ''))
 }
 
 export function closeDb() {

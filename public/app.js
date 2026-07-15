@@ -1,5 +1,45 @@
 /* Dewu dual-shop search — plain script (no module) */
 (function () {
+  const JWT_KEY = 'dewu_jwt'
+
+  function getJwt() {
+    return localStorage.getItem(JWT_KEY) || ''
+  }
+
+  function clearAuthAndRedirect() {
+    try {localStorage.removeItem(JWT_KEY)} catch (_) { /* ignore */}
+    location.replace('/login.html')
+  }
+
+  function authHeaders(extra) {
+    const headers = {...(extra || {})}
+    const token = getJwt()
+    if (token) headers.Authorization = `Bearer ${token}`
+    return headers
+  }
+
+  async function apiFetch(url, options) {
+    const opts = {...(options || {})}
+    const baseHeaders = opts.body instanceof FormData
+      ? {}
+      : {'Content-Type': 'application/json'}
+    opts.headers = authHeaders({...baseHeaders, ...(opts.headers || {})})
+    if (opts.body instanceof FormData) {
+      delete opts.headers['Content-Type']
+    }
+    const res = await fetch(url, opts)
+    if (res.status === 401) {
+      clearAuthAndRedirect()
+      throw new Error('登录已失效，请重新登录')
+    }
+    return res
+  }
+
+  if (!getJwt()) {
+    clearAuthAndRedirect()
+    return
+  }
+
   const $ = (id) => document.getElementById(id)
   const els = {
     startDate: $('startDate'),
@@ -741,7 +781,7 @@
     if (els.shop.value) params.set('shop', els.shop.value)
     els.categoryLabel.textContent = '类目加载中…'
     try {
-      const res = await fetch(`/api/categories?${params}`, {cache: 'no-store'})
+      const res = await apiFetch(`/api/categories?${params}`, {cache: 'no-store'})
       const json = await res.json()
       if (token !== categoryFetchToken) return
       if (!json.ok) throw new Error(json.error || '类目加载失败')
@@ -790,7 +830,7 @@
     try {
       const controller = new AbortController()
       const timeout = window.setTimeout(() => controller.abort(), 180000)
-      const res = await fetch('/api/search', {
+      const res = await apiFetch('/api/search', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(query),
@@ -892,11 +932,11 @@
     deploying = true
     if (els.deployBtn) els.deployBtn.disabled = true
     try {
-      const res = await fetch('/pull', {
+      const res = await apiFetch('/pull', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          'X-Deploy-Token': token,
         },
         body: JSON.stringify({token}),
       })
@@ -1086,13 +1126,13 @@
       form.append('token', token)
       valid.forEach((item) => form.append('files', item.file, item.name))
 
-      const res = await fetch('/api/upload', {
+      const res = await apiFetch('/api/upload', {
         method: 'POST',
         body: form,
         cache: 'no-store',
       })
       const json = await res.json()
-      if (res.status === 401) {
+      if (res.status === 403) {
         throw new Error(json.error || '上传口令错误')
       }
       const results = json.data?.results || []
@@ -1344,13 +1384,13 @@
       form.append('token', token)
       valid.forEach((item) => form.append('files', item.file, item.name))
 
-      const res = await fetch('/api/upload-promo', {
+      const res = await apiFetch('/api/upload-promo', {
         method: 'POST',
         body: form,
         cache: 'no-store',
       })
       const json = await res.json()
-      if (res.status === 401) {
+      if (res.status === 403) {
         throw new Error(json.error || '上传口令错误')
       }
       const results = json.data?.results || []
@@ -1432,7 +1472,7 @@
     els.serverStatus.className = 'empty-hint'
 
     try {
-      const res = await fetch('/api/meta', {cache: 'no-store'})
+      const res = await apiFetch('/api/meta', {cache: 'no-store'})
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const json = await res.json()
       if (!json.ok) throw new Error(json.error || '元数据失败')
@@ -1451,6 +1491,7 @@
         })
       })
     } catch (err) {
+      if (String(err.message || '').includes('登录')) return
       meta = null
       els.metaHint.textContent = '未连接服务'
       els.serverStatus.innerHTML = `连接失败。请在目录 <code>C:\\Users\\l\\Desktop\\dewu\\dewu</code> 运行 <code>npm start</code>，然后打开 <code>http://localhost:3780</code>`

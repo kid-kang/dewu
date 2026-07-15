@@ -14,6 +14,8 @@ import {
   savePairedUploads,
   savePromoUploads,
 } from './dataService.js'
+import {openDb} from './db.js'
+import {authenticateUser, requireAuth, signUserToken} from './auth.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(__dirname, '..')
@@ -101,9 +103,6 @@ function checkUploadToken(provided) {
 }
 
 function getDeployToken(req) {
-  const auth = req.get('authorization') || ''
-  const bearer = auth.match(/^Bearer\s+(.+)$/i)
-  if (bearer) return bearer[1].trim()
   return req.get('x-deploy-token') || req.body?.token || req.query?.token
 }
 
@@ -161,6 +160,29 @@ function cleanupJobs() {
 }
 setInterval(cleanupJobs, 60_000).unref()
 
+app.post('/api/login', (req, res) => {
+  try {
+    const username = String(req.body?.username || '').trim()
+    const password = String(req.body?.password || '')
+    if (!username || !password) {
+      res.status(400).json({ok: false, error: '请输入账号和密码'})
+      return
+    }
+    const user = authenticateUser(root, username, password)
+    if (!user) {
+      res.status(401).json({ok: false, error: '账号或密码错误'})
+      return
+    }
+    const token = signUserToken(user)
+    res.json({ok: true, data: {token, username: user.username, expiresIn: '365d'}})
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ok: false, error: String(err.message || err)})
+  }
+})
+
+app.use('/api', requireAuth)
+
 app.get('/api/meta', (_req, res) => {
   try {
     res.json({ok: true, data: metaWithCommit()})
@@ -177,7 +199,7 @@ app.post('/api/upload', (req, res) => {
     }
     try {
       if (!checkUploadToken(req.body?.token)) {
-        res.status(401).json({ok: false, error: '上传口令错误'})
+        res.status(403).json({ok: false, error: '上传口令错误'})
         return
       }
 
@@ -224,7 +246,7 @@ app.post('/api/upload-promo', (req, res) => {
     }
     try {
       if (!checkUploadToken(req.body?.token)) {
-        res.status(401).json({ok: false, error: '上传口令错误'})
+        res.status(403).json({ok: false, error: '上传口令错误'})
         return
       }
 
@@ -353,10 +375,10 @@ app.post('/api/search', async (req, res) => {
   }
 })
 
-/** 校验口令后立即返回；git pull 用脱附进程跑，避免 node --watch 重启杀掉 pull */
-app.post('/pull', (req, res) => {
+/** 校验 JWT + 部署口令后立即返回；git pull 用脱附进程跑，避免 node --watch 重启杀掉 pull */
+app.post('/pull', requireAuth, (req, res) => {
   if (!checkToken(getDeployToken(req), DEPLOY_TOKEN)) {
-    res.status(401).json({ok: false, error: '部署口令错误'})
+    res.status(403).json({ok: false, error: '部署口令错误'})
     return
   }
   try {
@@ -376,6 +398,7 @@ app.post('/pull', (req, res) => {
 })
 
 app.listen(PORT, () => {
+  openDb(root)
   const meta = getMeta(root)
   console.log(`Dewu search ready at http://localhost:${PORT}`)
   writeLog(`server start port=${PORT} commit=${COMMIT_ID}`)

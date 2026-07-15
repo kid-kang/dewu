@@ -11,10 +11,17 @@
   <link
     href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Figtree:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
     rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css?v=31" />
+  <link rel="stylesheet" href="/styles.css?v=32" />
 </head>
 
 <body>
+  <script>
+    (function () {
+      if (!localStorage.getItem('dewu_jwt')) {
+        location.replace('/login.html')
+      }
+    })()
+  </script>
   <div class="grain" aria-hidden="true"></div>
 
   <div class="page">
@@ -339,7 +346,7 @@
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-  <script src="/app.js?v=37"></script>
+  <script src="/app.js?v=38"></script>
 </body>
 
 </html>

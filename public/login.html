@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-store" />
+  <title>登录 · 双店对账</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Figtree:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css?v=32" />
+</head>
+
+<body>
+  <div class="grain" aria-hidden="true"></div>
+  <div class="login-page">
+    <form class="login-card" id="loginForm" autocomplete="on">
+      <p class="mast-kicker">得物 · 双店对账台</p>
+      <h1>登录</h1>
+      <p class="login-copy">请输入账号密码后进入对账台</p>
+      <label class="field">
+        <span>账号</span>
+        <input type="text" id="username" name="username" placeholder="账号" autocomplete="username" required />
+      </label>
+      <label class="field">
+        <span>密码</span>
+        <input type="password" id="password" name="password" placeholder="密码" autocomplete="current-password" required />
+      </label>
+      <p class="login-error" id="loginError" hidden></p>
+      <button type="submit" class="btn-primary" id="loginBtn">进入对账台</button>
+    </form>
+  </div>
+  <script>
+    (function () {
+      var KEY = 'dewu_jwt'
+      if (localStorage.getItem(KEY)) {
+        location.replace('/')
+        return
+      }
+      var form = document.getElementById('loginForm')
+      var errEl = document.getElementById('loginError')
+      var btn = document.getElementById('loginBtn')
+      form.addEventListener('submit', async function (e) {
+        e.preventDefault()
+        errEl.hidden = true
+        btn.disabled = true
+        try {
+          var res = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              username: document.getElementById('username').value.trim(),
+              password: document.getElementById('password').value,
+            }),
+          })
+          var json = await res.json().catch(function () { return {} })
+          if (!res.ok || !json.ok || !json.data || !json.data.token) {
+            throw new Error(json.error || '登录失败')
+          }
+          localStorage.setItem(KEY, json.data.token)
+          location.replace('/')
+        } catch (err) {
+          errEl.textContent = err.message || '登录失败'
+          errEl.hidden = false
+        } finally {
+          btn.disabled = false
+        }
+      })
+    })()
+  </script>
+</body>
+
+</html>
