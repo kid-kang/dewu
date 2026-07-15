@@ -994,24 +994,8 @@ body.modal-open {
   display: table-cell;
 }
 
-.data-table th.promo-col {
-  background: rgba(176, 137, 0, 0.14);
-  color: #8a6a00;
-  border-bottom-color: rgba(176, 137, 0, 0.35);
-}
-
-.data-table th.promo-col .th-sort {
-  color: #8a6a00;
-}
-
 .data-table td.promo-col {
-  background: rgba(176, 137, 0, 0.07);
   color: #8a6a00;
-  font-weight: 700;
-}
-
-.data-table tbody tr:hover td.promo-col {
-  background: rgba(176, 137, 0, 0.12);
 }
 
 .rate-cell {
