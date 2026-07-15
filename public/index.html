@@ -82,6 +82,7 @@
           <span class="period-mark" id="presetMonth" title="起止恰好为一整月时为整月">整月</span>
         </div>
         <div class="filter-actions-right">
+          <button type="button" class="btn-ghost" id="openPromoUploadBtn" title="上传得物推数据表">上传得物推</button>
           <button type="button" class="btn-ghost" id="openUploadBtn" title="上传大店/小店日期表">上传日期表</button>
           <button type="button" class="btn-ghost" id="resetBtn">重置条件</button>
           <button type="button" class="btn-primary" id="searchBtn">开始对账</button>
@@ -269,8 +270,56 @@
     </div>
   </div>
 
+  <div class="modal" id="promoUploadModal" hidden>
+    <div class="modal-backdrop" data-close-promo-upload></div>
+    <div class="modal-card upload-modal" role="dialog" aria-modal="true" aria-labelledby="promoUploadModalTitle">
+      <div class="upload-head">
+        <div>
+          <h2 id="promoUploadModalTitle">上传得物推</h2>
+          <p>按文件名中的<strong>日期区间</strong>写入，支持单日或跨日范围，可一次多选</p>
+        </div>
+        <button type="button" class="modal-close" id="closePromoUploadBtn" aria-label="关闭"
+          data-close-promo-upload>&times;</button>
+      </div>
+      <div class="upload-tips" role="note">
+        <p class="upload-tips-title">上传规则</p>
+        <ul>
+          <li>命名与「得物推数据」目录一致：
+            <code>YYYY.M.D-YYYY.M.D.xlsx</code>（区间）或
+            <code>YYYY.M.D.xlsx</code>（单日）
+          </li>
+          <li>示例：区间 <code>2026.7.15-2026.9.30.xlsx</code>；单日
+            <code>2026.7.15.xlsx</code> 或 <code>2026.7.15-2026.7.15.xlsx</code>
+          </li>
+          <li>表结构：第 1 行说明、第 2 行表头、第 3 行起为数据；需含日期、商品ID、消耗、直接支付金额等列</li>
+          <li>若文件名日期与已有得物推文件<strong>重叠</strong>（含完全相同），将拒绝上传</li>
+          <li>同一次多选时，彼此日期区间也不可重叠</li>
+          <li>上传成功后会写入 <code>得物推数据/</code> 并同步 SQLite</li>
+          <li>上传前须填写正确口令</li>
+        </ul>
+      </div>
+      <label class="field upload-token-field">
+        <span>上传口令</span>
+        <input type="text" id="promoUploadToken" placeholder="请输入上传口令" autocomplete="off" spellcheck="false" />
+      </label>
+      <div class="upload-controls">
+        <div class="upload-file-wrap">
+          <span class="upload-file-label">选择得物推文件</span>
+          <div class="upload-file-row">
+            <input type="file" id="promoUploadFiles"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple />
+            <button type="button" class="btn-ghost" id="promoUploadPickBtn">选择 .xlsx</button>
+            <span class="upload-file-meta" id="promoUploadFileMeta">未选择文件</span>
+          </div>
+        </div>
+        <button type="button" class="btn-primary" id="promoUploadBtn" disabled>开始上传</button>
+      </div>
+      <ul class="upload-list" id="promoUploadList" hidden></ul>
+    </div>
+  </div>
+
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-  <script src="/app.js?v=34"></script>
+  <script src="/app.js?v=35"></script>
 </body>
 
 </html>

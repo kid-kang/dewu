@@ -1,17 +1,27 @@
 import fs from 'fs'
 import path from 'path'
 import XLSX from 'xlsx'
+import {
+  openDb,
+  dbExists,
+  upsertShopDay,
+  deleteShopDay,
+  upsertPromoRows,
+  deletePromoRange,
+  promoRangeHasData,
+  setMetaFile,
+  deleteMetaFile,
+  queryShopRows,
+  queryPromoAgg,
+  listShopDatesFromDb,
+  listAvailableDatesFromDb,
+  getMetaFromDb,
+} from './db.js'
 
 const SHOPS = {
   大店: '大店',
   小店: '小店',
 }
-
-const CACHE_VERSION = 1
-const READ_CONCURRENCY = 2
-
-/** @type {Map<string, { mtimeMs: number, rows: object[] }>} */
-const memoryCache = new Map()
 
 function yieldEventLoop() {
   return new Promise((resolve) => setImmediate(resolve))
@@ -21,42 +31,60 @@ function shopDir(root, shop) {
   return path.join(root, shop)
 }
 
-function cacheDir(root) {
-  return path.join(root, '.cache')
-}
-
-function cachePathFor(root, shop, date) {
-  return path.join(cacheDir(root), shop, `${date}.json`)
-}
-
 function promoDir(root) {
   return path.join(root, '得物推数据')
 }
 
-function promoCachePath(root, fileName) {
-  return path.join(cacheDir(root), '得物推', `${fileName}.json`)
+function requireDb(root) {
+  if (!dbExists(root)) {
+    throw new Error('尚未导入数据库，请先运行 npm run import:db')
+  }
+  return openDb(root)
 }
 
-const PROMO_CACHE_VERSION = 1
+function rangesOverlap(aStart, aEnd, bStart, bEnd) {
+  return aStart <= bEnd && bStart <= aEnd
+}
 
 function pad2(n) {
   return String(n).padStart(2, '0')
 }
 
-/** Filename like 2026.4.1-2026.7.14.xlsx */
+/**
+ * Filename like 2026.4.1-2026.7.14.xlsx (range) or 2026.7.14.xlsx / 2026.7.14-2026.7.14.xlsx (single day).
+ * @returns {{ fileName: string, start: string, end: string, year: number } | null}
+ */
 export function parsePromoFilename(name) {
   const base = path.basename(String(name || ''))
-  const m = base.match(/^(\d{4})\.(\d{1,2})\.(\d{1,2})-(\d{4})\.(\d{1,2})\.(\d{1,2})\.xlsx$/i)
-  if (!m) return null
-  return {
-    fileName: base,
-    start: `${m[1]}${pad2(m[2])}${pad2(m[3])}`,
-    end: `${m[4]}${pad2(m[5])}${pad2(m[6])}`,
-    year: Number(m[1]),
+  const range = base.match(
+    /^(\d{4})\.(\d{1,2})\.(\d{1,2})-(\d{4})\.(\d{1,2})\.(\d{1,2})\.xlsx$/i,
+  )
+  if (range) {
+    const start = `${range[1]}${pad2(range[2])}${pad2(range[3])}`
+    const end = `${range[4]}${pad2(range[5])}${pad2(range[6])}`
+    if (!isValidYmd(start) || !isValidYmd(end) || start > end) return null
+    return {
+      fileName: base,
+      start,
+      end,
+      year: Number(range[1]),
+    }
   }
+  const single = base.match(/^(\d{4})\.(\d{1,2})\.(\d{1,2})\.xlsx$/i)
+  if (single) {
+    const ymd = `${single[1]}${pad2(single[2])}${pad2(single[3])}`
+    if (!isValidYmd(ymd)) return null
+    return {
+      fileName: base,
+      start: ymd,
+      end: ymd,
+      year: Number(single[1]),
+    }
+  }
+  return null
 }
 
-function listPromoFiles(root) {
+export function listPromoFiles(root) {
   const dir = promoDir(root)
   if (!fs.existsSync(dir)) return []
   return fs
@@ -67,7 +95,33 @@ function listPromoFiles(root) {
       ...info,
       filePath: path.join(dir, info.fileName),
     }))
-    .sort((a, b) => a.start.localeCompare(b.start))
+    .sort((a, b) => a.start.localeCompare(b.start) || a.end.localeCompare(b.end))
+}
+
+/**
+ * Find existing promo coverage that conflicts with [start, end].
+ * @returns {{ fileName?: string, start: string, end: string, reason: string } | null}
+ */
+export function findPromoConflict(root, start, end, {ignoreFileName = null} = {}) {
+  for (const f of listPromoFiles(root)) {
+    if (ignoreFileName && f.fileName === ignoreFileName) continue
+    if (rangesOverlap(start, end, f.start, f.end)) {
+      return {
+        fileName: f.fileName,
+        start: f.start,
+        end: f.end,
+        reason: `与已有文件 ${f.fileName}（${f.start}~${f.end}）日期重叠`,
+      }
+    }
+  }
+  if (dbExists(root) && promoRangeHasData(openDb(root), start, end)) {
+    return {
+      start,
+      end,
+      reason: `数据库中已存在 ${start}~${end} 区间的得物推数据`,
+    }
+  }
+  return null
 }
 
 function mdToYmd(md, year) {
@@ -113,7 +167,7 @@ function expandSheetRef(sheet) {
  * Compact promo rows: [ymd, spuid, cost, directPay]
  * @returns {Array<[string, string, number, number]>}
  */
-function parsePromoXlsx(filePath, year) {
+export function parsePromoXlsx(filePath, year) {
   const wb = XLSX.readFile(filePath, {cellDates: false, raw: false})
   const sheet = wb.Sheets[wb.SheetNames[0]]
   if (!sheet) return []
@@ -140,91 +194,30 @@ function parsePromoXlsx(filePath, year) {
   return rows
 }
 
-async function loadPromoFileRows(root, fileInfo) {
-  const {filePath, fileName, year} = fileInfo
-  const stat = await fs.promises.stat(filePath)
-  const memKey = `promo:${filePath}`
-  const cached = memoryCache.get(memKey)
-  if (cached && cached.mtimeMs === stat.mtimeMs) return cached.rows
-
-  const cp = promoCachePath(root, fileName)
-  try {
-    if (fs.existsSync(cp)) {
-      const raw = await fs.promises.readFile(cp, 'utf8')
-      const data = JSON.parse(raw)
-      if (data.v === PROMO_CACHE_VERSION && data.mtimeMs === stat.mtimeMs) {
-        memoryCache.set(memKey, {mtimeMs: stat.mtimeMs, rows: data.rows || []})
-        return data.rows || []
-      }
-    }
-  } catch {
-    /* fall through */
-  }
-
-  await yieldEventLoop()
-  const rows = parsePromoXlsx(filePath, year)
-  try {
-    fs.mkdirSync(path.dirname(cp), {recursive: true})
-    fs.writeFileSync(cp, JSON.stringify({v: PROMO_CACHE_VERSION, mtimeMs: stat.mtimeMs, rows}))
-  } catch (err) {
-    console.warn('promo cache write failed:', err.message)
-  }
-  memoryCache.set(memKey, {mtimeMs: stat.mtimeMs, rows})
-  await yieldEventLoop()
-  return rows
-}
-
 /**
  * Aggregate 得物推数据 by SPUID within [startDate, endDate].
  * @returns {Map<string, { recommendPayAmount: number, recommendCost: number, recommendRoi: number|null }>}
  */
 export async function aggregatePromoBySpuid(root, startDate, endDate, onProgress) {
-  /** @type {Map<string, { recommendPayAmount: number, recommendCost: number, recommendRoi: number|null }>} */
-  const map = new Map()
-  if (!startDate || !endDate) return map
-
-  const files = listPromoFiles(root).filter((f) => f.start <= endDate && f.end >= startDate)
-  if (!files.length) return map
-
-  for (let i = 0; i < files.length; i++) {
-    const file = files[i]
-    if (onProgress) {
-      await onProgress({
-        type: 'progress',
-        phase: 'promo',
-        done: i,
-        total: files.length,
-        label: `得物推 ${file.fileName}`,
-      })
-    }
-    const rows = await loadPromoFileRows(root, file)
-    for (const [ymd, spuid, cost, directPay] of rows) {
-      if (ymd < startDate || ymd > endDate) continue
-      let bucket = map.get(spuid)
-      if (!bucket) {
-        bucket = {recommendPayAmount: 0, recommendCost: 0, recommendRoi: null}
-        map.set(spuid, bucket)
-      }
-      bucket.recommendPayAmount += directPay
-      bucket.recommendCost += cost
-    }
-  }
-
-  for (const bucket of map.values()) {
-    bucket.recommendPayAmount = round2(bucket.recommendPayAmount)
-    bucket.recommendCost = round2(bucket.recommendCost)
-    bucket.recommendRoi =
-      bucket.recommendCost === 0
-        ? null
-        : round2(bucket.recommendPayAmount / bucket.recommendCost)
-  }
-
+  if (!startDate || !endDate) return new Map()
   if (onProgress) {
     await onProgress({
       type: 'progress',
       phase: 'promo',
-      done: files.length,
-      total: files.length,
+      done: 0,
+      total: 1,
+      label: '查询得物推汇总',
+    })
+  }
+  await yieldEventLoop()
+  const db = requireDb(root)
+  const map = queryPromoAgg(db, {start: startDate, end: endDate})
+  if (onProgress) {
+    await onProgress({
+      type: 'progress',
+      phase: 'promo',
+      done: 1,
+      total: 1,
       label: '得物推汇总完成',
     })
   }
@@ -244,7 +237,7 @@ function attachPromoMetrics(detailRows, promoMap) {
 }
 
 
-function parseDateFromFilename(name) {
+export function parseDateFromFilename(name) {
   const base = path.basename(String(name || ''))
   const m = base.match(/^(\d{8})\.xlsx$/i)
   return m ? m[1] : null
@@ -271,13 +264,8 @@ export function parseUploadFilename(name) {
 }
 
 export function listShopDates(root, shop) {
-  const dir = shopDir(root, shop)
-  if (!fs.existsSync(dir)) return []
-  return fs
-    .readdirSync(dir)
-    .map((f) => parseDateFromFilename(f))
-    .filter(Boolean)
-    .sort()
+  if (!dbExists(root)) return []
+  return listShopDatesFromDb(openDb(root), shop)
 }
 
 export function shopDateExists(root, shop, date) {
@@ -286,7 +274,7 @@ export function shopDateExists(root, shop, date) {
 }
 
 /**
- * Save buffer as YYYYMMDD.xlsx into shop folder.
+ * Save buffer as YYYYMMDD.xlsx into shop folder, then upsert SQLite.
  * @returns {{ ok: boolean, error?: string, date?: string, shop?: string, rowCount?: number }}
  */
 export function saveUploadedShopFile(root, shop, date, buffer) {
@@ -305,13 +293,14 @@ export function saveUploadedShopFile(root, shop, date, buffer) {
   }
 
   const tmp = `${dest}.${process.pid}.${Date.now()}.tmp`
+  let wroteDb = false
   try {
     fs.writeFileSync(tmp, buffer)
     const rows = parseXlsxRows(tmp, shop, date)
     fs.renameSync(tmp, dest)
-    const stat = fs.statSync(dest)
-    writeDiskCache(root, shop, date, stat.mtimeMs, rows)
-    memoryCache.set(dest, {mtimeMs: stat.mtimeMs, rows})
+    const db = openDb(root)
+    upsertShopDay(db, shop, date, rows)
+    wroteDb = true
     return {ok: true, shop, date, rowCount: rows.length}
   } catch (err) {
     try {
@@ -324,24 +313,29 @@ export function saveUploadedShopFile(root, shop, date, buffer) {
     } catch {
       /* ignore */
     }
+    if (wroteDb) {
+      try {
+        deleteShopDay(openDb(root), shop, date)
+      } catch {
+        /* ignore */
+      }
+    }
     return {ok: false, error: `文件无法解析：${err.message || err}`}
   }
 }
 
 function removeShopDateFile(root, shop, date) {
   const dest = path.join(shopDir(root, shop), `${date}.xlsx`)
-  const cache = cachePathFor(root, shop, date)
   try {
     if (fs.existsSync(dest)) fs.unlinkSync(dest)
   } catch {
     /* ignore */
   }
   try {
-    if (fs.existsSync(cache)) fs.unlinkSync(cache)
+    if (dbExists(root)) deleteShopDay(openDb(root), shop, date)
   } catch {
     /* ignore */
   }
-  memoryCache.delete(dest)
 }
 
 /**
@@ -459,6 +453,234 @@ export function savePairedUploads(root, files) {
   }
 }
 
+/**
+ * Save one 得物推 xlsx into 得物推数据/ and upsert SQLite.
+ * @returns {{ ok: boolean, error?: string, fileName?: string, start?: string, end?: string, rowCount?: number }}
+ */
+export function saveUploadedPromoFile(root, fileName, buffer) {
+  const parsed = parsePromoFilename(fileName)
+  if (!parsed) {
+    return {ok: false, error: '命名须为 YYYY.M.D-YYYY.M.D.xlsx 或 YYYY.M.D.xlsx'}
+  }
+
+  const dir = promoDir(root)
+  fs.mkdirSync(dir, {recursive: true})
+  const dest = path.join(dir, parsed.fileName)
+  if (fs.existsSync(dest)) {
+    return {ok: false, error: `已存在文件 ${parsed.fileName}`}
+  }
+
+  const conflict = findPromoConflict(root, parsed.start, parsed.end)
+  if (conflict) {
+    return {ok: false, error: conflict.reason}
+  }
+
+  const tmp = `${dest}.${process.pid}.${Date.now()}.tmp`
+  let wroteDb = false
+  try {
+    fs.writeFileSync(tmp, buffer)
+    const rows = parsePromoXlsx(tmp, parsed.year)
+    if (!rows.length) {
+      throw new Error('未解析到有效数据行（请确认表头与列：日期/商品ID/消耗/直接支付金额）')
+    }
+    fs.renameSync(tmp, dest)
+    const db = openDb(root)
+    upsertPromoRows(db, rows, {start: parsed.start, end: parsed.end})
+    wroteDb = true
+    const relPath = `得物推数据/${parsed.fileName}`
+    const mtimeMs = fs.statSync(dest).mtimeMs
+    setMetaFile(db, 'promo', relPath, mtimeMs)
+    return {
+      ok: true,
+      fileName: parsed.fileName,
+      start: parsed.start,
+      end: parsed.end,
+      rowCount: rows.length,
+    }
+  } catch (err) {
+    try {
+      if (fs.existsSync(tmp)) fs.unlinkSync(tmp)
+    } catch {
+      /* ignore */
+    }
+    try {
+      if (fs.existsSync(dest)) fs.unlinkSync(dest)
+    } catch {
+      /* ignore */
+    }
+    if (wroteDb) {
+      try {
+        const db = openDb(root)
+        deletePromoRange(db, parsed.start, parsed.end)
+        deleteMetaFile(db, 'promo', `得物推数据/${parsed.fileName}`)
+      } catch {
+        /* ignore */
+      }
+    }
+    return {ok: false, error: `文件无法解析：${err.message || err}`}
+  }
+}
+
+function removePromoFile(root, fileName, start, end) {
+  const dest = path.join(promoDir(root), fileName)
+  try {
+    if (fs.existsSync(dest)) fs.unlinkSync(dest)
+  } catch {
+    /* ignore */
+  }
+  try {
+    const db = openDb(root)
+    if (start && end) deletePromoRange(db, start, end)
+    deleteMetaFile(db, 'promo', `得物推数据/${fileName}`)
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Validate and save 得物推 uploads. No partial write on failure.
+ * @param {{ originalname: string, buffer: Buffer }[]} files
+ */
+export function savePromoUploads(root, files) {
+  /** @type {{ name: string, ok: boolean, fileName?: string, start?: string, end?: string, rowCount?: number, error?: string }[]} */
+  const results = []
+  /** @type {{ name: string, fileName: string, start: string, end: string, year: number, buffer: Buffer }[]} */
+  const prepared = []
+  /** @type {Map<string, string>} */
+  const seenName = new Map()
+
+  for (const file of files) {
+    const name = file.originalname || 'unknown.xlsx'
+    if (!/\.xlsx$/i.test(name)) {
+      results.push({name, ok: false, error: '仅支持 .xlsx'})
+      continue
+    }
+    const parsed = parsePromoFilename(name)
+    if (!parsed) {
+      results.push({
+        name,
+        ok: false,
+        error: '命名须为 YYYY.M.D-YYYY.M.D.xlsx（区间）或 YYYY.M.D.xlsx（单日）',
+      })
+      continue
+    }
+    if (seenName.has(parsed.fileName.toLowerCase())) {
+      results.push({
+        name,
+        ok: false,
+        fileName: parsed.fileName,
+        start: parsed.start,
+        end: parsed.end,
+        error: `与 ${seenName.get(parsed.fileName.toLowerCase())} 重复`,
+      })
+      continue
+    }
+    seenName.set(parsed.fileName.toLowerCase(), name)
+
+    const conflict = findPromoConflict(root, parsed.start, parsed.end)
+    if (conflict) {
+      results.push({
+        name,
+        ok: false,
+        fileName: parsed.fileName,
+        start: parsed.start,
+        end: parsed.end,
+        error: conflict.reason,
+      })
+      continue
+    }
+
+    prepared.push({
+      name,
+      fileName: parsed.fileName,
+      start: parsed.start,
+      end: parsed.end,
+      year: parsed.year,
+      buffer: file.buffer,
+    })
+    results.push({
+      name,
+      ok: true,
+      fileName: parsed.fileName,
+      start: parsed.start,
+      end: parsed.end,
+    })
+  }
+
+  // Within-batch range overlap
+  const overlapErrors = new Map()
+  for (let i = 0; i < prepared.length; i++) {
+    for (let j = i + 1; j < prepared.length; j++) {
+      const a = prepared[i]
+      const b = prepared[j]
+      if (rangesOverlap(a.start, a.end, b.start, b.end)) {
+        const msg = `与同批次 ${b.name}（${b.start}~${b.end}）日期重叠`
+        if (!overlapErrors.has(a.name)) overlapErrors.set(a.name, msg)
+        if (!overlapErrors.has(b.name)) {
+          overlapErrors.set(b.name, `与同批次 ${a.name}（${a.start}~${a.end}）日期重叠`)
+        }
+      }
+    }
+  }
+
+  if (overlapErrors.size || results.some((r) => !r.ok)) {
+    return {
+      ok: false,
+      results: results.map((r) => {
+        if (!r.ok) return r
+        if (overlapErrors.has(r.name)) {
+          return {...r, ok: false, error: overlapErrors.get(r.name)}
+        }
+        return {...r, ok: false, error: '同批次存在无效文件，已取消写入'}
+      }),
+      okCount: 0,
+      failCount: results.length,
+      saved: false,
+    }
+  }
+
+  /** @type {{ fileName: string, start: string, end: string }[]} */
+  const written = []
+  for (const item of prepared) {
+    const saved = saveUploadedPromoFile(root, item.fileName, item.buffer)
+    if (!saved.ok) {
+      for (const w of written) removePromoFile(root, w.fileName, w.start, w.end)
+      return {
+        ok: false,
+        results: results.map((r) => {
+          if (r.name === item.name) {
+            return {...r, ok: false, error: saved.error || '写入失败'}
+          }
+          if (written.some((w) => w.fileName === r.fileName)) {
+            return {...r, ok: false, error: '同批次写入失败，已回滚'}
+          }
+          return {...r, ok: false, error: '同批次写入失败，已取消'}
+        }),
+        okCount: 0,
+        failCount: results.length,
+        saved: false,
+      }
+    }
+    written.push({fileName: item.fileName, start: item.start, end: item.end})
+    const idx = results.findIndex((r) => r.name === item.name)
+    if (idx >= 0) {
+      results[idx] = {
+        ...results[idx],
+        ok: true,
+        rowCount: saved.rowCount || 0,
+      }
+    }
+  }
+
+  return {
+    ok: true,
+    results,
+    okCount: results.length,
+    failCount: 0,
+    saved: true,
+  }
+}
+
 
 /** Extract first number from mixed cell values like "79430.0元" or "3390 (指数)" */
 export function parseNumber(value) {
@@ -483,25 +705,7 @@ function normalizeRow(raw, shop, date) {
   }
 }
 
-function rowsToCompact(rows) {
-  return rows.map((r) => [r.spuid, r.sku, r.category, r.payAmount, r.detailVisitors, r.favorites, r.payUsers])
-}
-
-function compactToRows(compact, shop, date) {
-  return compact.map(([spuid, sku, category, payAmount, detailVisitors, favorites, payUsers]) => ({
-    date,
-    shop,
-    spuid: String(spuid),
-    sku: String(sku ?? ''),
-    category: String(category ?? ''),
-    payAmount: Number(payAmount) || 0,
-    detailVisitors: Number(detailVisitors) || 0,
-    favorites: Number(favorites) || 0,
-    payUsers: Number(payUsers) || 0,
-  }))
-}
-
-function parseXlsxRows(filePath, shop, date) {
+export function parseXlsxRows(filePath, shop, date) {
   const wb = XLSX.readFile(filePath, {
     cellDates: false,
     raw: false,
@@ -513,137 +717,24 @@ function parseXlsxRows(filePath, shop, date) {
     .filter((r) => r.spuid)
 }
 
-function ensureCacheDir(root, shop) {
-  const dir = path.join(cacheDir(root), shop)
-  fs.mkdirSync(dir, {recursive: true})
-  return dir
-}
-
-function writeDiskCache(root, shop, date, mtimeMs, rows) {
-  try {
-    ensureCacheDir(root, shop)
-    const payload = JSON.stringify({
-      v: CACHE_VERSION,
-      mtimeMs,
-      rows: rowsToCompact(rows),
-    })
-    fs.writeFileSync(cachePathFor(root, shop, date), payload)
-  } catch (err) {
-    console.warn('cache write failed:', err.message)
-  }
-}
-
-async function readSheetRows(root, filePath, shop, date) {
-  const stat = await fs.promises.stat(filePath)
-  const memKey = filePath
-  const cached = memoryCache.get(memKey)
-  if (cached && cached.mtimeMs === stat.mtimeMs) return cached.rows
-
-  let rows = null
-  const cp = cachePathFor(root, shop, date)
-  try {
-    if (fs.existsSync(cp)) {
-      const raw = await fs.promises.readFile(cp, 'utf8')
-      const data = JSON.parse(raw)
-      if (data.v === CACHE_VERSION && data.mtimeMs === stat.mtimeMs) {
-        rows = compactToRows(data.rows || [], shop, date)
-      }
-    }
-  } catch {
-    rows = null
-  }
-
-  if (!rows) {
-    // yield before heavy sync parse so progress socket can flush
-    await yieldEventLoop()
-    rows = parseXlsxRows(filePath, shop, date)
-    writeDiskCache(root, shop, date, stat.mtimeMs, rows)
-  }
-
-  memoryCache.set(memKey, {mtimeMs: stat.mtimeMs, rows})
-  await yieldEventLoop()
-  return rows
-}
-
 export function listAvailableDates(root, shops = Object.keys(SHOPS)) {
-  const set = new Set()
-  for (const shop of shops) {
-    const dir = shopDir(root, shop)
-    if (!fs.existsSync(dir)) continue
-    for (const name of fs.readdirSync(dir)) {
-      const d = parseDateFromFilename(name)
-      if (d) set.add(d)
-    }
-  }
-  return [...set].sort()
-}
-
-function datesInRange(allDates, start, end) {
-  return allDates.filter((d) => (!start || d >= start) && (!end || d <= end))
-}
-
-function listJobs(root, shops, start, end) {
-  const allDates = listAvailableDates(root, shops)
-  const dates = datesInRange(allDates, start, end)
-  /** @type {{ shop: string, date: string, filePath: string }[]} */
-  const jobs = []
-
-  for (const shop of shops) {
-    const dir = shopDir(root, shop)
-    if (!fs.existsSync(dir)) continue
-    for (const date of dates) {
-      const filePath = path.join(dir, `${date}.xlsx`)
-      if (!fs.existsSync(filePath)) continue
-      jobs.push({shop, date, filePath})
-    }
-  }
-  return jobs
-}
-
-async function mapPool(items, concurrency, mapper, onProgress) {
-  const results = new Array(items.length)
-  let next = 0
-  let done = 0
-
-  async function worker() {
-    while (next < items.length) {
-      const i = next++
-      const item = items[i]
-      results[i] = await mapper(item, i)
-      done += 1
-      if (onProgress) await onProgress(done, items.length, item)
-      await yieldEventLoop()
-    }
-  }
-
-  const workers = Array.from({length: Math.min(concurrency, Math.max(items.length, 1))}, () => worker())
-  await Promise.all(workers)
-  return results
+  if (!dbExists(root)) return []
+  return listAvailableDatesFromDb(openDb(root), shops)
 }
 
 /**
  * @param {(done:number,total:number,info?:object)=>void|Promise<void>} [onProgress]
  */
 export async function loadRowsForRange(root, shops, start, end, onProgress) {
-  const jobs = listJobs(root, shops, start, end)
-  if (!jobs.length) {
-    if (onProgress) await onProgress(0, 0)
-    return []
-  }
-
-  if (onProgress) await onProgress(0, jobs.length, {shop: '', date: '', starting: true})
-
-  const chunks = await mapPool(
-    jobs,
-    READ_CONCURRENCY,
-    async (job) => readSheetRows(root, job.filePath, job.shop, job.date),
-    async (done, total, job) => {
-      if (onProgress) await onProgress(done, total, {shop: job.shop, date: job.date})
-    },
-  )
-
-  const rows = []
-  for (const chunk of chunks) rows.push(...chunk)
+  if (onProgress) await onProgress(0, 1, {shop: '', date: '', starting: true})
+  await yieldEventLoop()
+  const db = requireDb(root)
+  const rows = queryShopRows(db, {
+    start: start || null,
+    end: end || null,
+    shops: shops?.length ? shops : null,
+  })
+  if (onProgress) await onProgress(1, 1, {shop: shops?.[0] || '', date: `${start || ''}~${end || ''}`})
   return rows
 }
 
@@ -922,23 +1013,24 @@ export function mergeDetailRows(rows) {
 }
 
 export function getMeta(root) {
-  const dates = listAvailableDates(root)
-  const bigDates = listShopDates(root, '大店')
-  const smallDates = listShopDates(root, '小店')
-  return {
-    shops: Object.keys(SHOPS),
-    dates,
-    minDate: dates[0] || null,
-    maxDate: dates[dates.length - 1] || null,
-    fileCounts: {
-      大店: bigDates.length,
-      小店: smallDates.length,
-    },
-    fileDates: {
-      大店: bigDates,
-      小店: smallDates,
-    },
+  const promoFiles = listPromoFiles(root).map((f) => ({
+    fileName: f.fileName,
+    start: f.start,
+    end: f.end,
+  }))
+  if (!dbExists(root)) {
+    return {
+      shops: Object.keys(SHOPS),
+      dates: [],
+      minDate: null,
+      maxDate: null,
+      fileCounts: {大店: 0, 小店: 0},
+      fileDates: {大店: [], 小店: []},
+      promoFiles,
+      dbReady: false,
+    }
   }
+  return {...getMetaFromDb(openDb(root)), promoFiles, dbReady: true}
 }
 
 export async function getCategories(root, {startDate, endDate, shop} = {}, onProgress) {
@@ -971,9 +1063,9 @@ export async function search(root, query, onProgress) {
         done,
         total,
         label: info?.starting
-          ? `准备读取 ${total} 个文件`
+          ? '从数据库查询中'
           : info
-            ? `${info.shop} ${info.date}`
+            ? `${info.shop || '店铺'} ${info.date || ''}`.trim()
             : '',
       })
     }
@@ -1074,28 +1166,17 @@ export async function search(root, query, onProgress) {
   }
 }
 
-/** Warm JSON cache in background so later searches stay fast */
-export function warmCache(root, {recentDays = 45, concurrency = 4} = {}) {
-  const dates = listAvailableDates(root)
-  const recent = dates.slice(-recentDays)
-  const jobs = listJobs(root, Object.keys(SHOPS), recent[0] || null, recent[recent.length - 1] || null)
-
-  const total = jobs.length
-  console.log(`缓存预热: 最近 ${recent.length} 天，共 ${total} 个文件`);
-
-  (async () => {
-    await mapPool(
-      jobs,
-      concurrency,
-      async (job) => {
-        await readSheetRows(root, job.filePath, job.shop, job.date)
-      },
-      (done) => {
-        if (done === total || done % 20 === 0) {
-          console.log(`缓存预热进度 ${done}/${total}`)
-        }
-      },
-    )
-    console.log('缓存预热完成（近期数据）')
-  })().catch((err) => console.warn('缓存预热失败:', err.message))
+/** Open DB on startup; no longer preloads xlsx into memory. */
+export function warmCache(root) {
+  if (!dbExists(root)) {
+    console.warn('未找到 data/dewu.sqlite，请先运行: npm run import:db')
+    return
+  }
+  try {
+    openDb(root)
+    const meta = getMetaFromDb(openDb(root))
+    console.log(`SQLite 已就绪: ${meta.minDate || '-'} ~ ${meta.maxDate || '-'}`)
+  } catch (err) {
+    console.warn('打开 SQLite 失败:', err.message)
+  }
 }

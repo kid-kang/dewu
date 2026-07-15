@@ -10,6 +10,7 @@ import {
   search,
   warmCache,
   savePairedUploads,
+  savePromoUploads,
 } from './dataService.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -102,6 +103,42 @@ app.post('/api/upload', (req, res) => {
       })
 
       const batch = savePairedUploads(root, normalized)
+      res.status(batch.ok ? 200 : 400).json({
+        ok: batch.ok,
+        error: batch.ok ? undefined : '校验未通过或写入失败，未写入任何文件',
+        data: {
+          results: batch.results,
+          okCount: batch.okCount,
+          failCount: batch.failCount,
+          meta: getMeta(root),
+        },
+      })
+    } catch (e) {
+      console.error(e)
+      res.status(500).json({ok: false, error: String(e.message || e)})
+    }
+  })
+})
+
+app.post('/api/upload-promo', (req, res) => {
+  upload.array('files', 20)(req, res, (err) => {
+    if (err) {
+      res.status(400).json({ok: false, error: String(err.message || err)})
+      return
+    }
+    try {
+      if (!checkUploadToken(req.body?.token)) {
+        res.status(401).json({ok: false, error: '上传口令错误'})
+        return
+      }
+
+      const files = Array.isArray(req.files) ? req.files : []
+      if (!files.length) {
+        res.status(400).json({ok: false, error: '请选择得物推 .xlsx 文件'})
+        return
+      }
+
+      const batch = savePromoUploads(root, files)
       res.status(batch.ok ? 200 : 400).json({
         ok: batch.ok,
         error: batch.ok ? undefined : '校验未通过或写入失败，未写入任何文件',
@@ -223,8 +260,12 @@ app.post('/api/search', async (req, res) => {
 app.listen(PORT, () => {
   const meta = getMeta(root)
   console.log(`Dewu search ready at http://localhost:${PORT}`)
-  console.log(`数据范围: ${meta.minDate} ~ ${meta.maxDate}`)
-  console.log(`文件数: 大店 ${meta.fileCounts.大店} / 小店 ${meta.fileCounts.小店}`)
+  if (!meta.dbReady) {
+    console.warn('尚未导入 SQLite，请先运行: npm run import:db')
+  } else {
+    console.log(`数据范围: ${meta.minDate} ~ ${meta.maxDate}`)
+    console.log(`日期数: 大店 ${meta.fileCounts.大店} / 小店 ${meta.fileCounts.小店}`)
+  }
   console.log('请用浏览器打开上面的地址（不要直接打开 index.html）')
-  warmCache(root, {recentDays: 90, concurrency: 4})
+  warmCache(root)
 })

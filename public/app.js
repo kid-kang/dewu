@@ -40,6 +40,15 @@
     uploadFileMeta: $('uploadFileMeta'),
     uploadBtn: $('uploadBtn'),
     uploadList: $('uploadList'),
+    openPromoUploadBtn: $('openPromoUploadBtn'),
+    closePromoUploadBtn: $('closePromoUploadBtn'),
+    promoUploadModal: $('promoUploadModal'),
+    promoUploadToken: $('promoUploadToken'),
+    promoUploadFiles: $('promoUploadFiles'),
+    promoUploadPickBtn: $('promoUploadPickBtn'),
+    promoUploadFileMeta: $('promoUploadFileMeta'),
+    promoUploadBtn: $('promoUploadBtn'),
+    promoUploadList: $('promoUploadList'),
     periodHint: $('periodHint'),
     compareLegend: $('compareLegend'),
     presetDay: $('presetDay'),
@@ -66,6 +75,13 @@
   /** @type {{ file: File, name: string, ok: boolean, msg: string }[]} */
   let pendingUploads = []
   let uploading = false
+  /** @type {{ file: File, name: string, ok: boolean, msg: string, start?: string, end?: string }[]} */
+  let pendingPromoUploads = []
+  let promoUploading = false
+
+  function pad2(n) {
+    return String(n).padStart(2, '0')
+  }
 
   function ymdToInput(ymd) {
     if (!ymd || ymd.length !== 8) return ''
@@ -848,7 +864,9 @@
   function closeUploadModal() {
     if (!els.uploadModal || uploading) return
     els.uploadModal.hidden = true
-    document.body.classList.remove('modal-open')
+    if (!els.promoUploadModal || els.promoUploadModal.hidden) {
+      document.body.classList.remove('modal-open')
+    }
   }
 
   function parseUploadFilename(name) {
@@ -1060,6 +1078,260 @@
     }
   }
 
+  function openPromoUploadModal() {
+    if (!els.promoUploadModal) return
+    els.promoUploadModal.hidden = false
+    document.body.classList.add('modal-open')
+    if (els.promoUploadToken) {
+      try {
+        const saved = sessionStorage.getItem('dewu_upload_token')
+        if (saved && !els.promoUploadToken.value) els.promoUploadToken.value = saved
+      } catch (_) { /* ignore */}
+      els.promoUploadToken.focus()
+    }
+  }
+
+  function closePromoUploadModal() {
+    if (!els.promoUploadModal || promoUploading) return
+    els.promoUploadModal.hidden = true
+    if (!els.uploadModal || els.uploadModal.hidden) {
+      document.body.classList.remove('modal-open')
+    }
+  }
+
+  function parsePromoUploadFilename(name) {
+    const base = String(name || '').split(/[/\\]/).pop() || ''
+    const range = base.match(
+      /^(\d{4})\.(\d{1,2})\.(\d{1,2})-(\d{4})\.(\d{1,2})\.(\d{1,2})\.xlsx$/i,
+    )
+    if (range) {
+      const start = `${range[1]}${pad2(range[2])}${pad2(range[3])}`
+      const end = `${range[4]}${pad2(range[5])}${pad2(range[6])}`
+      if (!isValidUploadYmd(start) || !isValidUploadYmd(end) || start > end) return null
+      return {fileName: base, start, end}
+    }
+    const single = base.match(/^(\d{4})\.(\d{1,2})\.(\d{1,2})\.xlsx$/i)
+    if (single) {
+      const ymd = `${single[1]}${pad2(single[2])}${pad2(single[3])}`
+      if (!isValidUploadYmd(ymd)) return null
+      return {fileName: base, start: ymd, end: ymd}
+    }
+    return null
+  }
+
+  function rangesOverlap(aStart, aEnd, bStart, bEnd) {
+    return aStart <= bEnd && bStart <= aEnd
+  }
+
+  function formatPromoRange(start, end) {
+    if (!start || !end) return ''
+    return start === end ? start : `${start}~${end}`
+  }
+
+  function findExistingPromoConflict(start, end) {
+    const files = Array.isArray(meta?.promoFiles) ? meta.promoFiles : []
+    for (const f of files) {
+      if (rangesOverlap(start, end, f.start, f.end)) {
+        return `与已有 ${f.fileName}（${formatPromoRange(f.start, f.end)}）重叠`
+      }
+    }
+    return null
+  }
+
+  function syncPromoUploadSelection() {
+    const files = els.promoUploadFiles?.files ? Array.from(els.promoUploadFiles.files) : []
+    /** @type {Map<string, string>} */
+    const seenName = new Map()
+
+    pendingPromoUploads = files.map((file) => {
+      const name = file.name || ''
+      if (!/\.xlsx$/i.test(name)) {
+        return {file, name, ok: false, msg: '仅支持 .xlsx', status: 'invalid'}
+      }
+      const parsed = parsePromoUploadFilename(name)
+      if (!parsed) {
+        return {
+          file, name, ok: false,
+          msg: '命名须为 YYYY.M.D-YYYY.M.D.xlsx 或 YYYY.M.D.xlsx',
+          status: 'invalid',
+        }
+      }
+      const key = parsed.fileName.toLowerCase()
+      if (seenName.has(key)) {
+        return {
+          file, name, start: parsed.start, end: parsed.end,
+          ok: false, msg: `与 ${seenName.get(key)} 重复`, status: 'invalid',
+        }
+      }
+      const conflict = findExistingPromoConflict(parsed.start, parsed.end)
+      if (conflict) {
+        return {
+          file, name, start: parsed.start, end: parsed.end,
+          ok: false, msg: conflict, status: 'invalid',
+        }
+      }
+      seenName.set(key, name)
+      return {
+        file, name, start: parsed.start, end: parsed.end,
+        ok: true,
+        msg: `待上传 · ${formatPromoRange(parsed.start, parsed.end)}`,
+        status: 'ready',
+      }
+    })
+
+    // Within-batch overlap
+    for (let i = 0; i < pendingPromoUploads.length; i++) {
+      const a = pendingPromoUploads[i]
+      if (!a.ok || !a.start || !a.end) continue
+      for (let j = i + 1; j < pendingPromoUploads.length; j++) {
+        const b = pendingPromoUploads[j]
+        if (!b.ok || !b.start || !b.end) continue
+        if (!rangesOverlap(a.start, a.end, b.start, b.end)) continue
+        pendingPromoUploads[i] = {
+          ...a, ok: false, status: 'invalid',
+          msg: `与同批次 ${b.name}（${formatPromoRange(b.start, b.end)}）重叠`,
+        }
+        pendingPromoUploads[j] = {
+          ...b, ok: false, status: 'invalid',
+          msg: `与同批次 ${a.name}（${formatPromoRange(a.start, a.end)}）重叠`,
+        }
+      }
+    }
+
+    const readyCount = pendingPromoUploads.filter((x) => x.ok).length
+    if (els.promoUploadFileMeta) {
+      els.promoUploadFileMeta.textContent = files.length
+        ? `已选 ${files.length} 个 · 可上传 ${readyCount} 个`
+        : '未选择文件'
+    }
+    if (els.promoUploadBtn) {
+      els.promoUploadBtn.disabled = promoUploading || readyCount === 0 || readyCount !== files.length
+    }
+    renderPromoUploadList()
+  }
+
+  function renderPromoUploadList() {
+    if (!els.promoUploadList) return
+    if (!pendingPromoUploads.length) {
+      els.promoUploadList.hidden = true
+      els.promoUploadList.replaceChildren()
+      return
+    }
+    els.promoUploadList.hidden = false
+    const frag = document.createDocumentFragment()
+    pendingPromoUploads.forEach((item) => {
+      const li = document.createElement('li')
+      li.className = item.ok ? 'is-ok' : 'is-bad'
+      if (item.status === 'uploading') li.className = 'is-wait'
+      if (item.status === 'done-ok') li.className = 'is-ok'
+      if (item.status === 'done-bad') li.className = 'is-bad'
+      const name = document.createElement('span')
+      name.className = 'upload-name'
+      name.textContent = item.name
+      const msg = document.createElement('span')
+      msg.className = 'upload-msg'
+      msg.textContent = item.msg
+      li.append(name, msg)
+      frag.appendChild(li)
+    })
+    els.promoUploadList.replaceChildren(frag)
+  }
+
+  async function runPromoUpload() {
+    if (promoUploading || !meta) return
+    const token = String(els.promoUploadToken?.value || '').trim()
+    if (!token) {
+      showToast('请输入上传口令')
+      els.promoUploadToken?.focus()
+      return
+    }
+    const valid = pendingPromoUploads.filter((x) => x.ok)
+    if (!valid.length || valid.length !== pendingPromoUploads.length) {
+      showToast('请先通过校验：命名正确且日期区间不与已有数据重叠')
+      return
+    }
+
+    promoUploading = true
+    if (els.promoUploadBtn) els.promoUploadBtn.disabled = true
+    pendingPromoUploads = pendingPromoUploads.map((item) => (
+      item.ok
+        ? {...item, status: 'uploading', msg: '上传中…'}
+        : item
+    ))
+    renderPromoUploadList()
+
+    try {
+      const form = new FormData()
+      form.append('token', token)
+      valid.forEach((item) => form.append('files', item.file, item.name))
+
+      const res = await fetch('/api/upload-promo', {
+        method: 'POST',
+        body: form,
+        cache: 'no-store',
+      })
+      const json = await res.json()
+      if (res.status === 401) {
+        throw new Error(json.error || '上传口令错误')
+      }
+      const results = json.data?.results || []
+      const byName = new Map(results.map((r) => [r.name, r]))
+
+      pendingPromoUploads = pendingPromoUploads.map((item) => {
+        const r = byName.get(item.name)
+        if (!r) {
+          return {...item, status: 'done-bad', ok: false, msg: json.error || '未返回结果'}
+        }
+        if (r.ok) {
+          return {
+            ...item,
+            status: 'done-ok',
+            ok: true,
+            msg: `已写入 · ${formatPromoRange(r.start, r.end)} · ${r.rowCount || 0} 行`,
+          }
+        }
+        return {...item, status: 'done-bad', ok: false, msg: r.error || '上传失败'}
+      })
+      renderPromoUploadList()
+
+      if (json.data?.meta) {
+        applyMeta(json.data.meta, {preserveDates: true})
+      }
+
+      const okCount = json.data?.okCount || 0
+      const failCount = json.data?.failCount || pendingPromoUploads.length
+      if (json.ok && okCount) {
+        try {sessionStorage.setItem('dewu_upload_token', token)} catch (_) { /* ignore */}
+        showToast(`得物推上传成功 ${okCount} 个文件`)
+        window.setTimeout(() => closePromoUploadModal(), 600)
+      } else if (okCount) {
+        showToast(`成功 ${okCount} 个，失败 ${failCount} 个`)
+      } else {
+        showToast(json.error || `校验未通过（${failCount}）`)
+      }
+
+      if (els.promoUploadFiles) els.promoUploadFiles.value = ''
+      if (els.promoUploadFileMeta) {
+        els.promoUploadFileMeta.textContent = json.ok && okCount
+          ? `本次成功 ${okCount} 个`
+          : '未选择文件'
+      }
+    } catch (err) {
+      console.error(err)
+      pendingPromoUploads = pendingPromoUploads.map((item) => (
+        item.status === 'uploading'
+          ? {...item, status: 'done-bad', ok: false, msg: err.message || '上传失败'}
+          : item
+      ))
+      renderPromoUploadList()
+      showToast(err.message || '上传失败')
+      if (String(err.message || '').includes('口令')) els.promoUploadToken?.focus()
+    } finally {
+      promoUploading = false
+      if (els.promoUploadBtn) els.promoUploadBtn.disabled = true
+    }
+  }
+
   function resetFilters() {
     if (meta) {
       els.startDate.value = ymdToInput(meta.maxDate)
@@ -1112,10 +1384,20 @@
     if (els.openUploadBtn) {
       els.openUploadBtn.addEventListener('click', openUploadModal)
     }
+    if (els.openPromoUploadBtn) {
+      els.openPromoUploadBtn.addEventListener('click', openPromoUploadModal)
+    }
     if (els.uploadModal) {
       els.uploadModal.addEventListener('click', (e) => {
         if (e.target && e.target.closest('[data-close-upload]')) {
           closeUploadModal()
+        }
+      })
+    }
+    if (els.promoUploadModal) {
+      els.promoUploadModal.addEventListener('click', (e) => {
+        if (e.target && e.target.closest('[data-close-promo-upload]')) {
+          closePromoUploadModal()
         }
       })
     }
@@ -1127,6 +1409,15 @@
     }
     if (els.uploadBtn) {
       els.uploadBtn.addEventListener('click', runUpload)
+    }
+    if (els.promoUploadPickBtn && els.promoUploadFiles) {
+      els.promoUploadPickBtn.addEventListener('click', () => els.promoUploadFiles.click())
+    }
+    if (els.promoUploadFiles) {
+      els.promoUploadFiles.addEventListener('change', syncPromoUploadSelection)
+    }
+    if (els.promoUploadBtn) {
+      els.promoUploadBtn.addEventListener('click', runPromoUpload)
     }
     if (els.exportBoardBtn) {
       els.exportBoardBtn.addEventListener('click', exportBoardExcel)
@@ -1194,6 +1485,10 @@
     els.shop.addEventListener('change', refreshCats)
     updatePeriodHint()
     document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && els.promoUploadModal && !els.promoUploadModal.hidden) {
+        closePromoUploadModal()
+        return
+      }
       if (e.key === 'Escape' && els.uploadModal && !els.uploadModal.hidden) {
         closeUploadModal()
         return
