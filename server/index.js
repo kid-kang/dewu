@@ -2,8 +2,7 @@ import express from 'express'
 import cors from 'cors'
 import path from 'path'
 import multer from 'multer'
-import {execFile, execFileSync} from 'child_process'
-import {promisify} from 'util'
+import {spawn, execFileSync} from 'child_process'
 import {randomUUID, timingSafeEqual} from 'crypto'
 import {fileURLToPath} from 'url'
 import {
@@ -15,7 +14,6 @@ import {
   savePromoUploads,
 } from './dataService.js'
 
-const execFileAsync = promisify(execFile)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(__dirname, '..')
 const app = express()
@@ -288,29 +286,25 @@ app.post('/api/search', async (req, res) => {
   }
 })
 
-/** CI/CD webhook: verify token then git pull (node --watch will reload) */
-app.post('/pull', async (req, res) => {
+/** 校验口令后立即返回；git pull 用脱附进程跑，避免 node --watch 重启杀掉 pull */
+app.post('/pull', (req, res) => {
   if (!checkToken(getDeployToken(req), DEPLOY_TOKEN)) {
     res.status(401).json({ok: false, error: '部署口令错误'})
     return
   }
   try {
-    const {stdout, stderr} = await execFileAsync('git', ['pull', '--ff-only'], {
+    const child = spawn('git', ['pull', '--ff-only'], {
       cwd: root,
-      timeout: 60_000,
+      detached: true,
+      stdio: 'ignore',
       env: process.env,
     })
-    const output = [stdout, stderr].filter(Boolean).join('\n').trim()
-    console.log('[deploy] git pull ok:', output || '(empty)')
-    res.json({ok: true, output: output || 'Already up to date.'})
+    child.unref()
+    console.log('[deploy] git pull queued, pid=', child.pid)
+    res.json({ok: true, message: '已开始拉取，完成后服务会自动重载'})
   } catch (err) {
-    console.error('[deploy] git pull failed:', err)
-    res.status(500).json({
-      ok: false,
-      error: String(err.message || err),
-      stdout: err.stdout ? String(err.stdout) : undefined,
-      stderr: err.stderr ? String(err.stderr) : undefined,
-    })
+    console.error('[deploy] spawn git pull failed:', err)
+    res.status(500).json({ok: false, error: String(err.message || err)})
   }
 })
 

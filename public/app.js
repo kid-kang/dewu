@@ -50,6 +50,10 @@
     promoUploadFileMeta: $('promoUploadFileMeta'),
     promoUploadBtn: $('promoUploadBtn'),
     promoUploadList: $('promoUploadList'),
+    deployModal: $('deployModal'),
+    deployToken: $('deployToken'),
+    deployBtn: $('deployBtn'),
+    closeDeployBtn: $('closeDeployBtn'),
     periodHint: $('periodHint'),
     compareLegend: $('compareLegend'),
     presetDay: $('presetDay'),
@@ -76,6 +80,7 @@
   /** @type {{ file: File, name: string, ok: boolean, msg: string }[]} */
   let pendingUploads = []
   let uploading = false
+  let deploying = false
   /** @type {{ file: File, name: string, ok: boolean, msg: string, start?: string, end?: string }[]} */
   let pendingPromoUploads = []
   let promoUploading = false
@@ -847,6 +852,70 @@
     els.metaHint.textContent = `实时数据 ${ymdToInput(meta.minDate)} ~ ${ymdToInput(meta.maxDate)} · 大店 ${meta.fileCounts['大店']} · 小店 ${meta.fileCounts['小店']}`
     if (els.commitId && meta.commit) {
       els.commitId.textContent = meta.commit
+      els.commitId.hidden = false
+    }
+  }
+
+  function openDeployModal() {
+    if (!els.deployModal) return
+    els.deployModal.hidden = false
+    document.body.classList.add('modal-open')
+    if (els.deployToken) {
+      try {
+        const saved = sessionStorage.getItem('dewu_deploy_token')
+        if (saved && !els.deployToken.value) els.deployToken.value = saved
+      } catch (_) { /* ignore */}
+      els.deployToken.focus()
+      els.deployToken.select()
+    }
+  }
+
+  function closeDeployModal() {
+    if (!els.deployModal || deploying) return
+    els.deployModal.hidden = true
+    if (
+      (!els.uploadModal || els.uploadModal.hidden) &&
+      (!els.promoUploadModal || els.promoUploadModal.hidden)
+    ) {
+      document.body.classList.remove('modal-open')
+    }
+  }
+
+  async function runDeploy() {
+    if (deploying) return
+    const token = String(els.deployToken?.value || '').trim()
+    if (!token) {
+      showToast('请输入部署口令')
+      els.deployToken?.focus()
+      return
+    }
+    deploying = true
+    if (els.deployBtn) els.deployBtn.disabled = true
+    try {
+      const res = await fetch('/pull', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({token}),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || !json.ok) {
+        throw new Error(json.error || `部署失败 HTTP ${res.status}`)
+      }
+      try {
+        sessionStorage.setItem('dewu_deploy_token', token)
+      } catch (_) { /* ignore */}
+      deploying = false
+      closeDeployModal()
+      showToast(json.message || '已开始拉取，完成后自动重载')
+    } catch (err) {
+      showToast(String(err.message || err))
+      if (String(err.message || '').includes('口令')) els.deployToken?.focus()
+    } finally {
+      deploying = false
+      if (els.deployBtn) els.deployBtn.disabled = false
     }
   }
 
@@ -868,7 +937,10 @@
   function closeUploadModal() {
     if (!els.uploadModal || uploading) return
     els.uploadModal.hidden = true
-    if (!els.promoUploadModal || els.promoUploadModal.hidden) {
+    if (
+      (!els.promoUploadModal || els.promoUploadModal.hidden) &&
+      (!els.deployModal || els.deployModal.hidden)
+    ) {
       document.body.classList.remove('modal-open')
     }
   }
@@ -1098,7 +1170,10 @@
   function closePromoUploadModal() {
     if (!els.promoUploadModal || promoUploading) return
     els.promoUploadModal.hidden = true
-    if (!els.uploadModal || els.uploadModal.hidden) {
+    if (
+      (!els.uploadModal || els.uploadModal.hidden) &&
+      (!els.deployModal || els.deployModal.hidden)
+    ) {
       document.body.classList.remove('modal-open')
     }
   }
@@ -1423,6 +1498,27 @@
     if (els.promoUploadBtn) {
       els.promoUploadBtn.addEventListener('click', runPromoUpload)
     }
+    if (els.commitId) {
+      els.commitId.addEventListener('click', openDeployModal)
+    }
+    if (els.deployModal) {
+      els.deployModal.addEventListener('click', (e) => {
+        if (e.target && e.target.closest('[data-close-deploy]')) {
+          closeDeployModal()
+        }
+      })
+    }
+    if (els.deployBtn) {
+      els.deployBtn.addEventListener('click', runDeploy)
+    }
+    if (els.deployToken) {
+      els.deployToken.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          runDeploy()
+        }
+      })
+    }
     if (els.exportBoardBtn) {
       els.exportBoardBtn.addEventListener('click', exportBoardExcel)
     }
@@ -1489,6 +1585,10 @@
     els.shop.addEventListener('change', refreshCats)
     updatePeriodHint()
     document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && els.deployModal && !els.deployModal.hidden) {
+        closeDeployModal()
+        return
+      }
       if (e.key === 'Escape' && els.promoUploadModal && !els.promoUploadModal.hidden) {
         closePromoUploadModal()
         return
@@ -1497,7 +1597,7 @@
         closeUploadModal()
         return
       }
-      if (e.key === 'Enter' && e.target.matches('input') && e.target.id !== 'categorySearch') {
+      if (e.key === 'Enter' && e.target.matches('input') && e.target.id !== 'categorySearch' && e.target.id !== 'deployToken') {
         runSearch()
       }
     })

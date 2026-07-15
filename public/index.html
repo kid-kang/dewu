@@ -11,7 +11,7 @@
   <link
     href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Figtree:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
     rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css?v=30" />
+  <link rel="stylesheet" href="/styles.css?v=31" />
 </head>
 
 <body>
@@ -22,7 +22,7 @@
       <div class="mast-brand">
         <span class="hang-eye" aria-hidden="true"></span>
         <div>
-          <p class="mast-kicker">得物 · 双店对账台 <span id="commitId" class="mast-commit" title="当前部署版本"></span></p>
+          <p class="mast-kicker">得物 · 双店对账台 <button type="button" id="commitId" class="mast-commit" title="点击部署更新" hidden></button></p>
           <h1>双店对账</h1>
         </div>
       </div>
@@ -318,8 +318,28 @@
     </div>
   </div>
 
+  <div class="modal" id="deployModal" hidden>
+    <div class="modal-backdrop" data-close-deploy></div>
+    <div class="modal-card deploy-modal" role="dialog" aria-modal="true" aria-labelledby="deployModalTitle">
+      <div class="upload-head">
+        <div>
+          <h2 id="deployModalTitle">部署更新</h2>
+          <p>输入部署口令后拉取最新代码，服务会自动重载</p>
+        </div>
+        <button type="button" class="modal-close" id="closeDeployBtn" aria-label="关闭" data-close-deploy>&times;</button>
+      </div>
+      <label class="field upload-token-field">
+        <span>部署口令</span>
+        <input type="password" id="deployToken" placeholder="请输入 DEPLOY_TOKEN" autocomplete="off" spellcheck="false" />
+      </label>
+      <div class="deploy-actions">
+        <button type="button" class="btn-primary" id="deployBtn">开始拉取</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-  <script src="/app.js?v=36"></script>
+  <script src="/app.js?v=37"></script>
 </body>
 
 </html>

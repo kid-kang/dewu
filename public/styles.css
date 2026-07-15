@@ -112,14 +112,36 @@ select {
 
 .mast-commit {
   margin-left: 0.45em;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
   letter-spacing: 0.06em;
   text-transform: none;
   opacity: 0.72;
   font-weight: 500;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
 }
 
-.mast-commit:empty {
+.mast-commit:hover {
+  opacity: 1;
+}
+
+.mast-commit[hidden] {
   display: none;
+}
+
+.deploy-modal {
+  width: min(24rem, 100%);
+}
+
+.deploy-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.85rem;
 }
 
 .mast h1 {
