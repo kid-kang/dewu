@@ -29,6 +29,221 @@ function cachePathFor(root, shop, date) {
   return path.join(cacheDir(root), shop, `${date}.json`)
 }
 
+function promoDir(root) {
+  return path.join(root, '得物推数据')
+}
+
+function promoCachePath(root, fileName) {
+  return path.join(cacheDir(root), '得物推', `${fileName}.json`)
+}
+
+const PROMO_CACHE_VERSION = 1
+
+function pad2(n) {
+  return String(n).padStart(2, '0')
+}
+
+/** Filename like 2026.4.1-2026.7.14.xlsx */
+export function parsePromoFilename(name) {
+  const base = path.basename(String(name || ''))
+  const m = base.match(/^(\d{4})\.(\d{1,2})\.(\d{1,2})-(\d{4})\.(\d{1,2})\.(\d{1,2})\.xlsx$/i)
+  if (!m) return null
+  return {
+    fileName: base,
+    start: `${m[1]}${pad2(m[2])}${pad2(m[3])}`,
+    end: `${m[4]}${pad2(m[5])}${pad2(m[6])}`,
+    year: Number(m[1]),
+  }
+}
+
+function listPromoFiles(root) {
+  const dir = promoDir(root)
+  if (!fs.existsSync(dir)) return []
+  return fs
+    .readdirSync(dir)
+    .map((name) => parsePromoFilename(name))
+    .filter(Boolean)
+    .map((info) => ({
+      ...info,
+      filePath: path.join(dir, info.fileName),
+    }))
+    .sort((a, b) => a.start.localeCompare(b.start))
+}
+
+function mdToYmd(md, year) {
+  const m = String(md ?? '').trim().match(/^(\d{1,2})\/(\d{1,2})$/)
+  if (!m) return null
+  const ymd = `${year}${pad2(m[1])}${pad2(m[2])}`
+  return isValidYmd(ymd) ? ymd : null
+}
+
+/** Fix broken Excel dimension (often A1:AC2 while data has 20万+ rows). */
+function expandSheetRef(sheet) {
+  let maxR = 0
+  let maxC = 0
+  for (const key in sheet) {
+    if (key.charCodeAt(0) === 33) continue
+    let i = 0
+    while (i < key.length) {
+      const code = key.charCodeAt(i)
+      if (code >= 48 && code <= 57) break
+      i += 1
+    }
+    if (i === 0 || i >= key.length) continue
+    const rowNum = Number(key.slice(i))
+    if (!Number.isFinite(rowNum)) continue
+    if (rowNum > maxR) maxR = rowNum
+    // rough col from letters
+    let col = 0
+    for (let j = 0; j < i; j++) {
+      const c = key.charCodeAt(j)
+      if (c >= 65 && c <= 90) col = col * 26 + (c - 64)
+      else if (c >= 97 && c <= 122) col = col * 26 + (c - 96)
+    }
+    if (col > maxC) maxC = col
+  }
+  if (maxR < 1) return
+  sheet['!ref'] = XLSX.utils.encode_range({
+    s: {r: 0, c: 0},
+    e: {r: maxR - 1, c: Math.max(maxC - 1, 0)},
+  })
+}
+
+/**
+ * Compact promo rows: [ymd, spuid, cost, directPay]
+ * @returns {Array<[string, string, number, number]>}
+ */
+function parsePromoXlsx(filePath, year) {
+  const wb = XLSX.readFile(filePath, {cellDates: false, raw: false})
+  const sheet = wb.Sheets[wb.SheetNames[0]]
+  if (!sheet) return []
+  expandSheetRef(sheet)
+
+  let maxR = 0
+  const decoded = sheet['!ref'] ? XLSX.utils.decode_range(sheet['!ref']) : null
+  if (decoded) maxR = decoded.e.r + 1
+
+  /** @type {Array<[string, string, number, number]>} */
+  const rows = []
+  // Row1 notice, Row2 header, data from Row3
+  for (let excelRow = 3; excelRow <= maxR; excelRow++) {
+    const md = sheet[`A${excelRow}`]?.v
+    const spuidRaw = sheet[`G${excelRow}`]?.v
+    if (md == null && spuidRaw == null) continue
+    const ymd = mdToYmd(md, year)
+    const spuid = String(spuidRaw ?? '').trim()
+    if (!ymd || !spuid) continue
+    const cost = parseNumber(sheet[`H${excelRow}`]?.v)
+    const directPay = parseNumber(sheet[`P${excelRow}`]?.v)
+    rows.push([ymd, spuid, cost, directPay])
+  }
+  return rows
+}
+
+async function loadPromoFileRows(root, fileInfo) {
+  const {filePath, fileName, year} = fileInfo
+  const stat = await fs.promises.stat(filePath)
+  const memKey = `promo:${filePath}`
+  const cached = memoryCache.get(memKey)
+  if (cached && cached.mtimeMs === stat.mtimeMs) return cached.rows
+
+  const cp = promoCachePath(root, fileName)
+  try {
+    if (fs.existsSync(cp)) {
+      const raw = await fs.promises.readFile(cp, 'utf8')
+      const data = JSON.parse(raw)
+      if (data.v === PROMO_CACHE_VERSION && data.mtimeMs === stat.mtimeMs) {
+        memoryCache.set(memKey, {mtimeMs: stat.mtimeMs, rows: data.rows || []})
+        return data.rows || []
+      }
+    }
+  } catch {
+    /* fall through */
+  }
+
+  await yieldEventLoop()
+  const rows = parsePromoXlsx(filePath, year)
+  try {
+    fs.mkdirSync(path.dirname(cp), {recursive: true})
+    fs.writeFileSync(cp, JSON.stringify({v: PROMO_CACHE_VERSION, mtimeMs: stat.mtimeMs, rows}))
+  } catch (err) {
+    console.warn('promo cache write failed:', err.message)
+  }
+  memoryCache.set(memKey, {mtimeMs: stat.mtimeMs, rows})
+  await yieldEventLoop()
+  return rows
+}
+
+/**
+ * Aggregate 得物推数据 by SPUID within [startDate, endDate].
+ * @returns {Map<string, { recommendPayAmount: number, recommendCost: number, recommendRoi: number|null }>}
+ */
+export async function aggregatePromoBySpuid(root, startDate, endDate, onProgress) {
+  /** @type {Map<string, { recommendPayAmount: number, recommendCost: number, recommendRoi: number|null }>} */
+  const map = new Map()
+  if (!startDate || !endDate) return map
+
+  const files = listPromoFiles(root).filter((f) => f.start <= endDate && f.end >= startDate)
+  if (!files.length) return map
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i]
+    if (onProgress) {
+      await onProgress({
+        type: 'progress',
+        phase: 'promo',
+        done: i,
+        total: files.length,
+        label: `得物推 ${file.fileName}`,
+      })
+    }
+    const rows = await loadPromoFileRows(root, file)
+    for (const [ymd, spuid, cost, directPay] of rows) {
+      if (ymd < startDate || ymd > endDate) continue
+      let bucket = map.get(spuid)
+      if (!bucket) {
+        bucket = {recommendPayAmount: 0, recommendCost: 0, recommendRoi: null}
+        map.set(spuid, bucket)
+      }
+      bucket.recommendPayAmount += directPay
+      bucket.recommendCost += cost
+    }
+  }
+
+  for (const bucket of map.values()) {
+    bucket.recommendPayAmount = round2(bucket.recommendPayAmount)
+    bucket.recommendCost = round2(bucket.recommendCost)
+    bucket.recommendRoi =
+      bucket.recommendCost === 0
+        ? null
+        : round2(bucket.recommendPayAmount / bucket.recommendCost)
+  }
+
+  if (onProgress) {
+    await onProgress({
+      type: 'progress',
+      phase: 'promo',
+      done: files.length,
+      total: files.length,
+      label: '得物推汇总完成',
+    })
+  }
+  return map
+}
+
+function attachPromoMetrics(detailRows, promoMap) {
+  return detailRows.map((row) => {
+    const promo = promoMap.get(String(row.spuid))
+    return {
+      ...row,
+      recommendPayAmount: promo ? promo.recommendPayAmount : 0,
+      recommendCost: promo ? promo.recommendCost : 0,
+      recommendRoi: promo ? promo.recommendRoi : null,
+    }
+  })
+}
+
+
 function parseDateFromFilename(name) {
   const base = path.basename(String(name || ''))
   const m = base.match(/^(\d{8})\.xlsx$/i)
@@ -821,6 +1036,17 @@ export async function search(root, query, onProgress) {
       compare.yoy?.rows || [],
       compare.pop?.rows || [],
     )
+  }
+
+  if (onProgress) {
+    await onProgress({type: 'progress', phase: 'promo', done: 0, total: 1, label: '汇总得物推数据'})
+  }
+  try {
+    const promoMap = await aggregatePromoBySpuid(root, startDate || null, endDate || null, onProgress)
+    detailRows = attachPromoMetrics(detailRows, promoMap)
+  } catch (err) {
+    console.warn('得物推汇总失败:', err.message)
+    detailRows = attachPromoMetrics(detailRows, new Map())
   }
 
   // 对比明细已合并进主表，响应里不再回传对比期整表
