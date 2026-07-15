@@ -22,7 +22,6 @@ const root = path.resolve(__dirname, '..')
 const app = express()
 const PORT = process.env.PORT || 3780
 const UPLOAD_TOKEN = process.env.UPLOAD_TOKEN || '我爱康康的大宝贝'
-const DEPLOY_TOKEN = process.env.DEPLOY_TOKEN || 'USRh8epyY6GMJ2DB'
 
 const logDir = path.join(root, 'logs')
 const logFile = path.join(logDir, 'log.log')
@@ -99,10 +98,6 @@ function checkToken(provided, expected) {
 
 function checkUploadToken(provided) {
   return checkToken(provided, UPLOAD_TOKEN)
-}
-
-function getDeployToken(req) {
-  return req.get('x-deploy-token') || req.body?.token || req.query?.token
 }
 
 app.use(cors())
@@ -374,12 +369,8 @@ app.post('/api/search', async (req, res) => {
   }
 })
 
-/** 校验 JWT + 部署口令后立即返回；git pull 用脱附进程跑，避免 node --watch 重启杀掉 pull */
+/** 已登录即可；立即返回，git pull 用脱附进程跑，避免 node --watch 重启杀掉 pull */
 app.post('/pull', requireAuth, (req, res) => {
-  if (!checkToken(getDeployToken(req), DEPLOY_TOKEN)) {
-    res.status(403).json({ok: false, error: '部署口令错误'})
-    return
-  }
   try {
     const child = spawn('git', ['pull', '--ff-only'], {
       cwd: root,

@@ -177,16 +177,6 @@ select {
   display: none;
 }
 
-.deploy-modal {
-  width: min(24rem, 100%);
-}
-
-.deploy-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 0.85rem;
-}
-
 .mast h1 {
   margin: 0;
   font-family: var(--font-display);
