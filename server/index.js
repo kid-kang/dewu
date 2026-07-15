@@ -1,6 +1,7 @@
 import express from 'express'
 import cors from 'cors'
 import path from 'path'
+import fs from 'fs'
 import multer from 'multer'
 import {spawn, execFileSync} from 'child_process'
 import {randomUUID, timingSafeEqual} from 'crypto'
@@ -20,6 +21,42 @@ const app = express()
 const PORT = process.env.PORT || 3780
 const UPLOAD_TOKEN = process.env.UPLOAD_TOKEN || '我爱康康的大宝贝'
 const DEPLOY_TOKEN = process.env.DEPLOY_TOKEN || 'USRh8epyY6GMJ2DB'
+
+const logDir = path.join(root, 'logs')
+const logFile = path.join(logDir, 'log.log')
+fs.mkdirSync(logDir, {recursive: true})
+
+function writeLog(message) {
+  const line = `${new Date().toISOString()} ${message}\n`
+  fs.appendFile(logFile, line, (err) => {
+    if (err) console.error('[log] write failed:', err)
+  })
+}
+
+function redactValue(key, value) {
+  if (/token|password|authorization|secret/i.test(String(key))) return '***'
+  return value
+}
+
+function summarizePayload(obj) {
+  if (!obj || typeof obj !== 'object') return undefined
+  const out = {}
+  for (const [key, value] of Object.entries(obj)) {
+    if (Array.isArray(value) && value.length > 8) {
+      out[key] = `[${value.length} items]`
+    } else {
+      out[key] = redactValue(key, value)
+    }
+  }
+  return out
+}
+
+function isApiRequest(req) {
+  const p = req.path || ''
+  return p.startsWith('/api') || p === '/pull'
+}
+
+app.set('trust proxy', true)
 
 function getCommitId() {
   try {
@@ -72,6 +109,36 @@ function getDeployToken(req) {
 
 app.use(cors())
 app.use(express.json({limit: '2mb'}))
+app.use((req, res, next) => {
+  if (!isApiRequest(req)) {
+    next()
+    return
+  }
+  const start = Date.now()
+  res.on('finish', () => {
+    const ms = Date.now() - start
+    const query = summarizePayload(req.query)
+    const body = summarizePayload(req.body)
+    const files = Array.isArray(req.files)
+      ? req.files.map((f) => f.originalname || 'unknown')
+      : undefined
+    const extra = []
+    if (query && Object.keys(query).length) extra.push(`query=${JSON.stringify(query)}`)
+    if (body && Object.keys(body).length) extra.push(`body=${JSON.stringify(body)}`)
+    if (files?.length) extra.push(`files=${JSON.stringify(files)}`)
+    writeLog(
+      [
+        req.method,
+        req.originalUrl || req.url,
+        res.statusCode,
+        `${ms}ms`,
+        req.ip || '-',
+        ...extra,
+      ].join(' '),
+    )
+  })
+  next()
+})
 app.use('/vendor/xlsx', express.static(path.join(root, 'node_modules/xlsx/dist'), {
   maxAge: '7d',
 }))
@@ -311,6 +378,7 @@ app.post('/pull', (req, res) => {
 app.listen(PORT, () => {
   const meta = getMeta(root)
   console.log(`Dewu search ready at http://localhost:${PORT}`)
+  writeLog(`server start port=${PORT} commit=${COMMIT_ID}`)
   if (!meta.dbReady) {
     console.warn('尚未导入 SQLite，请先运行: npm run import:db')
   } else {
