@@ -11,7 +11,7 @@
   <link
     href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Figtree:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
     rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css?v=26" />
+  <link rel="stylesheet" href="/styles.css?v=28" />
 </head>
 
 <body>
@@ -121,7 +121,7 @@
       <div class="section-head">
         <div class="section-head-main">
           <h2>明细清单</h2>
-          <p>相同 SPUID 已合并；商详/收藏仅计大店；单日/整周/整月时显示各指标环比与同比</p>
+          <p>相同 SPUID 已合并；商详/收藏仅计大店；末三列为得物推数据汇总；单日/整周/整月时显示各指标环比与同比</p>
         </div>
         <div class="section-head-actions">
           <button type="button" class="btn-board-action" id="exportDetailBtn" title="导出明细清单为 Excel">
@@ -196,6 +196,21 @@
                   同比<span class="sort-icon" aria-hidden="true"></span>
                 </button>
               </th>
+              <th class="num promo-col">
+                <button type="button" class="th-sort" data-sort="recommendPayAmount">
+                  推荐直接支付金额<span class="sort-icon" aria-hidden="true"></span>
+                </button>
+              </th>
+              <th class="num promo-col">
+                <button type="button" class="th-sort" data-sort="recommendCost">
+                  推荐消耗<span class="sort-icon" aria-hidden="true"></span>
+                </button>
+              </th>
+              <th class="num promo-col">
+                <button type="button" class="th-sort" data-sort="recommendRoi">
+                  推荐直接支付ROI<span class="sort-icon" aria-hidden="true"></span>
+                </button>
+              </th>
             </tr>
           </thead>
           <tbody id="tableBody"></tbody>
@@ -255,7 +270,7 @@
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-  <script src="/app.js?v=31"></script>
+  <script src="/app.js?v=34"></script>
 </body>
 
 </html>

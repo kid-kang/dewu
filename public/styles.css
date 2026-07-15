@@ -747,7 +747,7 @@ body.modal-open {
 
 .lane-main {
   display: grid;
-  grid-template-columns: 2.8rem 1fr auto;
+  grid-template-columns: 2.8rem 1fr;
   align-items: center;
   gap: 0.35rem;
 }
@@ -876,6 +876,7 @@ body.modal-open {
   font-size: 1.02rem;
   letter-spacing: -0.02em;
   color: var(--mark);
+  text-align: right;
 }
 
 .lane.big .lane-value {
@@ -890,35 +891,6 @@ body.modal-open {
   color: #8a6800;
   font-size: 1.12rem;
   font-weight: 800;
-}
-
-.copy-btn {
-  width: 1.65rem;
-  height: 1.65rem;
-  border: 1.5px solid var(--line);
-  background: var(--paper);
-  color: var(--mute);
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-  transition: color 0.15s, border-color 0.15s, background 0.15s, transform 0.12s;
-}
-
-.copy-btn:hover,
-.copy-btn:focus-visible {
-  color: var(--ink);
-  border-color: var(--ink);
-  background: var(--mark-soft);
-  outline: none;
-}
-
-.copy-btn:active {
-  transform: scale(0.92);
-}
-
-.copy-btn.copied {
-  color: var(--ok);
-  border-color: var(--ok);
 }
 
 .table-scroll {
@@ -953,6 +925,18 @@ body.modal-open {
   font-weight: 700;
   letter-spacing: 0.04em;
   border-bottom: 1.5px solid var(--ink);
+}
+
+.data-table th.num,
+.data-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.data-table td.num {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--mark);
 }
 
 .th-sort {
@@ -1010,6 +994,26 @@ body.modal-open {
   display: table-cell;
 }
 
+.data-table th.promo-col {
+  background: rgba(176, 137, 0, 0.14);
+  color: #8a6a00;
+  border-bottom-color: rgba(176, 137, 0, 0.35);
+}
+
+.data-table th.promo-col .th-sort {
+  color: #8a6a00;
+}
+
+.data-table td.promo-col {
+  background: rgba(176, 137, 0, 0.07);
+  color: #8a6a00;
+  font-weight: 700;
+}
+
+.data-table tbody tr:hover td.promo-col {
+  background: rgba(176, 137, 0, 0.12);
+}
+
 .rate-cell {
   font-family: var(--font-mono);
   font-weight: 700;
@@ -1020,24 +1024,6 @@ body.modal-open {
 .rate-cell.cmp-down { color: #1f8a5b; }
 .rate-cell.cmp-flat { color: var(--mute); }
 .rate-cell.cmp-na { color: #9aabbc; font-weight: 500; }
-
-.cell-with-copy {
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 0.35rem;
-  width: 100%;
-}
-
-.cell-with-copy-text {
-  justify-content: flex-start;
-}
-
-.cell-with-copy > span {
-  font-weight: 700;
-  color: var(--mark);
-  font-size: 0.95rem;
-}
 
 .empty {
   position: relative;

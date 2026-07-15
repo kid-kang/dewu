@@ -1,7 +1,5 @@
 /* Dewu dual-shop search — plain script (no module) */
 (function () {
-  const COPY_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M4 16V6a2 2 0 0 1 2-2h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>'
-
   const $ = (id) => document.getElementById(id)
   const els = {
     startDate: $('startDate'),
@@ -213,36 +211,6 @@
     }, success ? 400 : 1600)
   }
 
-  async function copyValue(raw, btn) {
-    const text = String(raw)
-    try {
-      await navigator.clipboard.writeText(text)
-    } catch {
-      const ta = document.createElement('textarea')
-      ta.value = text
-      document.body.appendChild(ta)
-      ta.select()
-      document.execCommand('copy')
-      ta.remove()
-    }
-    btn.classList.add('copied')
-    showToast('已复制')
-    window.setTimeout(() => btn.classList.remove('copied'), 900)
-  }
-
-  function createCopyButton(value) {
-    const btn = document.createElement('button')
-    btn.type = 'button'
-    btn.className = 'copy-btn'
-    btn.title = '复制纯数值'
-    btn.innerHTML = COPY_ICON
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation()
-      copyValue(value, btn)
-    })
-    return btn
-  }
-
   function renderMetricCard(title, lanes, options = {}) {
     const card = document.createElement('article')
     card.className = 'metric-card' + (options.merged ? ' is-merged' : '')
@@ -264,7 +232,7 @@
       const val = document.createElement('span')
       val.className = 'lane-value'
       val.textContent = formatNumber(lane.value)
-      main.append(tag, val, createCopyButton(lane.value))
+      main.append(tag, val)
       row.appendChild(main)
 
       const metricKey = lane.metricKey
@@ -461,6 +429,9 @@
       '支付用户数',
       '支付用户数环比',
       '支付用户数同比',
+      '推荐直接支付金额',
+      '推荐消耗',
+      '推荐直接支付ROI',
     ]
     const sorted = getSortedRows(lastRows)
     const rows = [header]
@@ -481,6 +452,11 @@
         row.payUsers == null ? '' : Number(row.payUsers),
         rateCellExport(row.payUsersPop),
         rateCellExport(row.payUsersYoy),
+        row.recommendPayAmount == null ? '' : Number(row.recommendPayAmount),
+        row.recommendCost == null ? '' : Number(row.recommendCost),
+        row.recommendRoi == null || Number.isNaN(Number(row.recommendRoi))
+          ? ''
+          : Number(row.recommendRoi),
       ])
     })
     return rows
@@ -501,6 +477,7 @@
         {wch: 14}, {wch: 18}, {wch: 18},
         {wch: 12}, {wch: 16}, {wch: 16},
         {wch: 12}, {wch: 16}, {wch: 16},
+        {wch: 16}, {wch: 12}, {wch: 16},
       ]
       const book = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(book, sheet, '明细清单')
@@ -549,15 +526,10 @@
     const td = document.createElement('td')
     td.className = 'num compare-col'
     const info = formatRateText(rate)
-    const wrap = document.createElement('div')
-    wrap.className = 'cell-with-copy'
     const span = document.createElement('span')
     span.className = `rate-cell ${info.cls}`
     span.textContent = info.text
-    // 复制纯数字百分比值，无 % 符号时用 —
-    const copyVal = rate == null || Number.isNaN(rate) ? '' : parseFloat(Number(rate).toFixed(1))
-    wrap.append(span, createCopyButton(copyVal === '' ? '—' : copyVal))
-    td.appendChild(wrap)
+    td.appendChild(span)
     tr.appendChild(td)
   }
 
@@ -573,26 +545,11 @@
     const frag = document.createDocumentFragment()
     sorted.forEach((row) => {
       const tr = document.createElement('tr')
-      const baseCells = [
-        {text: row.spuid, value: row.spuid, num: false, copy: true},
-        {text: row.sku, value: row.sku, num: false, copy: true},
-        {text: row.category, num: false, copy: false},
-      ]
-      baseCells.forEach((cell) => {
-        const td = document.createElement('td')
-        if (cell.num) td.className = 'num'
-        if (cell.copy) {
-          const wrap = document.createElement('div')
-          wrap.className = cell.num ? 'cell-with-copy' : 'cell-with-copy cell-with-copy-text'
-          const span = document.createElement('span')
-          span.textContent = cell.text
-          wrap.append(span, createCopyButton(cell.value ?? cell.text))
-          td.appendChild(wrap)
-        } else {
-          td.textContent = cell.text
-        }
-        tr.appendChild(td)
-      })
+        ;[row.spuid, row.sku, row.category].forEach((text, idx) => {
+          const td = document.createElement('td')
+          td.textContent = text ?? ''
+          tr.appendChild(td)
+        })
 
       const metrics = [
         {key: 'payAmount', value: row.payAmount},
@@ -603,15 +560,26 @@
       metrics.forEach((m) => {
         const td = document.createElement('td')
         td.className = 'num'
-        const wrap = document.createElement('div')
-        wrap.className = 'cell-with-copy'
-        const span = document.createElement('span')
-        span.textContent = formatNumber(m.value)
-        wrap.append(span, createCopyButton(m.value))
-        td.appendChild(wrap)
+        td.textContent = formatNumber(m.value)
         tr.appendChild(td)
         appendRateCell(tr, row[`${m.key}Pop`])
         appendRateCell(tr, row[`${m.key}Yoy`])
+      })
+
+      const promoMetrics = [
+        {text: formatNumber(row.recommendPayAmount)},
+        {text: formatNumber(row.recommendCost)},
+        {
+          text: row.recommendRoi == null || Number.isNaN(Number(row.recommendRoi))
+            ? '—'
+            : formatNumber(row.recommendRoi),
+        },
+      ]
+      promoMetrics.forEach((m) => {
+        const td = document.createElement('td')
+        td.className = 'num promo-col'
+        td.textContent = m.text
+        tr.appendChild(td)
       })
 
       frag.appendChild(tr)
