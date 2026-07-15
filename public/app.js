@@ -36,6 +36,7 @@
     openUploadBtn: $('openUploadBtn'),
     closeUploadBtn: $('closeUploadBtn'),
     uploadModal: $('uploadModal'),
+    uploadToken: $('uploadToken'),
     uploadFiles: $('uploadFiles'),
     uploadPickBtn: $('uploadPickBtn'),
     uploadFileMeta: $('uploadFileMeta'),
@@ -865,7 +866,15 @@
     if (!els.uploadModal) return
     els.uploadModal.hidden = false
     document.body.classList.add('modal-open')
-    if (els.closeUploadBtn) els.closeUploadBtn.focus()
+    if (els.uploadToken) {
+      try {
+        const saved = sessionStorage.getItem('dewu_upload_token')
+        if (saved && !els.uploadToken.value) els.uploadToken.value = saved
+      } catch (_) { /* ignore */}
+      els.uploadToken.focus()
+    } else if (els.closeUploadBtn) {
+      els.closeUploadBtn.focus()
+    }
   }
 
   function closeUploadModal() {
@@ -989,6 +998,12 @@
 
   async function runUpload() {
     if (uploading || !meta) return
+    const token = String(els.uploadToken?.value || '').trim()
+    if (!token) {
+      showToast('请输入上传口令')
+      els.uploadToken?.focus()
+      return
+    }
     const valid = pendingUploads.filter((x) => x.ok)
     if (!valid.length || valid.length !== pendingUploads.length) {
       showToast('请先通过校验：每个日期须成对包含大店与小店')
@@ -1006,6 +1021,7 @@
 
     try {
       const form = new FormData()
+      form.append('token', token)
       valid.forEach((item) => form.append('files', item.file, item.name))
 
       const res = await fetch('/api/upload', {
@@ -1014,6 +1030,9 @@
         cache: 'no-store',
       })
       const json = await res.json()
+      if (res.status === 401) {
+        throw new Error(json.error || '上传口令错误')
+      }
       const results = json.data?.results || []
       const byName = new Map(results.map((r) => [r.name, r]))
 
@@ -1042,6 +1061,7 @@
       const okCount = json.data?.okCount || 0
       const failCount = json.data?.failCount || pendingUploads.length
       if (json.ok && okCount) {
+        try {sessionStorage.setItem('dewu_upload_token', token)} catch (_) { /* ignore */}
         showToast(`上传成功 ${okCount} 个文件（${okCount / 2} 对）`)
         window.setTimeout(() => closeUploadModal(), 600)
       } else if (okCount) {
@@ -1065,6 +1085,7 @@
       ))
       renderUploadList()
       showToast(err.message || '上传失败')
+      if (String(err.message || '').includes('口令')) els.uploadToken?.focus()
     } finally {
       uploading = false
       if (els.uploadBtn) els.uploadBtn.disabled = true

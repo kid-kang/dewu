@@ -11,7 +11,7 @@
   <link
     href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Figtree:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
     rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css?v=25" />
+  <link rel="stylesheet" href="/styles.css?v=26" />
 </head>
 
 <body>
@@ -231,8 +231,13 @@
           <li>多日期时，每个日期都要一一对应成对</li>
           <li>存入文件夹时会自动改名为 <code>YYYYMMDD.xlsx</code></li>
           <li>若对应店铺已存在该日期文件，将拒绝上传</li>
+          <li>上传前须填写正确口令</li>
         </ul>
       </div>
+      <label class="field upload-token-field">
+        <span>上传口令</span>
+        <input type="text" id="uploadToken" placeholder="请输入上传口令" autocomplete="off" spellcheck="false" />
+      </label>
       <div class="upload-controls">
         <div class="upload-file-wrap">
           <span class="upload-file-label">选择成对文件</span>
@@ -250,7 +255,7 @@
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-  <script src="/app.js?v=29"></script>
+  <script src="/app.js?v=31"></script>
 </body>
 
 </html>

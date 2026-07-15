@@ -2,7 +2,7 @@ import express from 'express'
 import cors from 'cors'
 import path from 'path'
 import multer from 'multer'
-import {randomUUID} from 'crypto'
+import {randomUUID, timingSafeEqual} from 'crypto'
 import {fileURLToPath} from 'url'
 import {
   getMeta,
@@ -16,6 +16,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(__dirname, '..')
 const app = express()
 const PORT = process.env.PORT || 3780
+const UPLOAD_TOKEN = process.env.UPLOAD_TOKEN || '我爱康康的大宝贝'
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -31,6 +32,13 @@ const upload = multer({
 
 /** @type {Map<string, object>} */
 const jobs = new Map()
+
+function checkUploadToken(provided) {
+  const a = Buffer.from(String(provided ?? ''), 'utf8')
+  const b = Buffer.from(UPLOAD_TOKEN, 'utf8')
+  if (a.length !== b.length) return false
+  return timingSafeEqual(a, b)
+}
 
 app.use(cors())
 app.use(express.json({limit: '2mb'}))
@@ -71,6 +79,11 @@ app.post('/api/upload', (req, res) => {
       return
     }
     try {
+      if (!checkUploadToken(req.body?.token)) {
+        res.status(401).json({ok: false, error: '上传口令错误'})
+        return
+      }
+
       const files = Array.isArray(req.files) ? req.files : []
       if (!files.length) {
         res.status(400).json({ok: false, error: '请选择文件（须同时包含大店与小店成对日期）'})

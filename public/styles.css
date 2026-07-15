@@ -241,6 +241,26 @@ body.modal-open {
   color: var(--mark);
 }
 
+.upload-token-field {
+  margin-bottom: 0.9rem;
+}
+
+.upload-token-field input {
+  width: 100%;
+  height: 2.55rem;
+  border: 1.5px solid var(--line);
+  background: #f8fbfe;
+  padding: 0 0.8rem;
+  border-radius: var(--radius);
+  outline: none;
+}
+
+.upload-token-field input:focus {
+  border-color: var(--mark);
+  box-shadow: 0 0 0 3px var(--mark-soft);
+  background: var(--white);
+}
+
 .upload-controls {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
