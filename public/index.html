@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-store" />
+  <title>双店对账 · 得物</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Figtree:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css?v=25" />
+</head>
+
+<body>
+  <div class="grain" aria-hidden="true"></div>
+
+  <div class="page">
+    <header class="mast">
+      <div class="mast-brand">
+        <span class="hang-eye" aria-hidden="true"></span>
+        <div>
+          <p class="mast-kicker">得物 · 双店对账台</p>
+          <h1>双店对账</h1>
+        </div>
+      </div>
+      <p class="mast-status" id="metaHint">正在连接…</p>
+    </header>
+
+    <section class="clip" aria-label="搜索条件">
+      <div class="clip-rail" aria-hidden="true"></div>
+      <div class="filter-grid">
+        <label class="field">
+          <span>开始日期</span>
+          <input type="date" id="startDate" />
+        </label>
+        <label class="field">
+          <span>结束日期</span>
+          <input type="date" id="endDate" />
+        </label>
+        <label class="field">
+          <span>SPUID</span>
+          <input type="text" id="spuid" placeholder="模糊匹配" autocomplete="off" />
+        </label>
+        <label class="field">
+          <span>商品货号</span>
+          <input type="text" id="sku" placeholder="模糊匹配" autocomplete="off" />
+        </label>
+        <div class="field field-cascade">
+          <span>类目名称</span>
+          <button type="button" class="cascade-trigger" id="categoryTrigger" aria-expanded="false">
+            <span id="categoryLabel">全部类目</span>
+            <svg width="12" height="12" viewBox="0 0 14 14" aria-hidden="true">
+              <path d="M3 5l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" />
+            </svg>
+          </button>
+          <div class="cascade-panel" id="categoryPanel" hidden>
+            <input type="search" id="categorySearch" class="cascade-search" placeholder="搜索类目关键字" autocomplete="off" />
+            <div class="cascade-tools">
+              <button type="button" id="catSelectAll">全选</button>
+              <button type="button" id="catClear">清空</button>
+            </div>
+            <div class="cascade-tree" id="categoryTree"></div>
+            <p class="cascade-empty" id="categoryEmpty" hidden>无匹配类目</p>
+          </div>
+        </div>
+        <label class="field">
+          <span>店铺</span>
+          <select id="shop">
+            <option value="">全部（大店 + 小店）</option>
+            <option value="大店">大店</option>
+            <option value="小店">小店</option>
+          </select>
+        </label>
+      </div>
+      <div class="filter-actions">
+        <div class="period-presets" aria-label="当前日期区间类型标记">
+          <span class="period-mark" id="presetDay" title="开始日期等于结束日期时为单日">单日</span>
+          <span class="period-mark" id="presetWeek" title="起止恰好为一整周（周一至周日）时为整周">整周</span>
+          <span class="period-mark" id="presetMonth" title="起止恰好为一整月时为整月">整月</span>
+        </div>
+        <div class="filter-actions-right">
+          <button type="button" class="btn-ghost" id="openUploadBtn" title="上传大店/小店日期表">上传日期表</button>
+          <button type="button" class="btn-ghost" id="resetBtn">重置条件</button>
+          <button type="button" class="btn-primary" id="searchBtn">开始对账</button>
+        </div>
+      </div>
+      <p class="period-hint" id="periodHint">单日 / 整周（周一至周日）/ 整月 时，汇总看板会显示环比与同比</p>
+      <div class="inline-progress" id="inlineProgress" hidden>
+        <div class="progress-track">
+          <div class="progress-fill" id="progressFill"></div>
+        </div>
+        <p class="progress-meta" id="progressMeta">0%</p>
+      </div>
+    </section>
+
+    <section class="board" id="board" aria-label="汇总看板" hidden>
+      <div class="section-head">
+        <div class="section-head-main">
+          <h2>汇总看板</h2>
+          <p id="resultMeta"></p>
+        </div>
+        <div class="section-head-actions">
+          <button type="button" class="btn-board-action" id="exportBoardBtn" title="导出看板全部数据为 Excel">
+            导出数据
+          </button>
+        </div>
+      </div>
+      <div class="lane-legend">
+        <span class="swatch sum"></span>总和
+        <span class="swatch big"></span>大店
+        <span class="swatch small"></span>小店
+        <span class="compare-legend" id="compareLegend" hidden>环比 · 同比</span>
+      </div>
+      <div class="metrics" id="metrics"></div>
+    </section>
+
+    <section class="table-wrap" id="tableSection" aria-label="明细表" hidden>
+      <div class="section-head">
+        <div class="section-head-main">
+          <h2>明细清单</h2>
+          <p>相同 SPUID 已合并；商详/收藏仅计大店；单日/整周/整月时显示各指标环比与同比</p>
+        </div>
+        <div class="section-head-actions">
+          <button type="button" class="btn-board-action" id="exportDetailBtn" title="导出明细清单为 Excel">
+            导出数据
+          </button>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead>
+            <tr id="tableHeadRow">
+              <th>SPUID</th>
+              <th>商品货号</th>
+              <th>类目名称</th>
+              <th class="num">
+                <button type="button" class="th-sort" data-sort="payAmount">
+                  支付金额<span class="sort-icon" aria-hidden="true"></span>
+                </button>
+              </th>
+              <th class="num compare-col">
+                <button type="button" class="th-sort" data-sort="payAmountPop">
+                  环比<span class="sort-icon" aria-hidden="true"></span>
+                </button>
+              </th>
+              <th class="num compare-col">
+                <button type="button" class="th-sort" data-sort="payAmountYoy">
+                  同比<span class="sort-icon" aria-hidden="true"></span>
+                </button>
+              </th>
+              <th class="num">
+                <button type="button" class="th-sort" data-sort="detailVisitors">
+                  商详访问人数<span class="sort-icon" aria-hidden="true"></span>
+                </button>
+              </th>
+              <th class="num compare-col">
+                <button type="button" class="th-sort" data-sort="detailVisitorsPop">
+                  环比<span class="sort-icon" aria-hidden="true"></span>
+                </button>
+              </th>
+              <th class="num compare-col">
+                <button type="button" class="th-sort" data-sort="detailVisitorsYoy">
+                  同比<span class="sort-icon" aria-hidden="true"></span>
+                </button>
+              </th>
+              <th class="num">
+                <button type="button" class="th-sort" data-sort="favorites">
+                  收藏用户数<span class="sort-icon" aria-hidden="true"></span>
+                </button>
+              </th>
+              <th class="num compare-col">
+                <button type="button" class="th-sort" data-sort="favoritesPop">
+                  环比<span class="sort-icon" aria-hidden="true"></span>
+                </button>
+              </th>
+              <th class="num compare-col">
+                <button type="button" class="th-sort" data-sort="favoritesYoy">
+                  同比<span class="sort-icon" aria-hidden="true"></span>
+                </button>
+              </th>
+              <th class="num">
+                <button type="button" class="th-sort" data-sort="payUsers">
+                  支付用户数<span class="sort-icon" aria-hidden="true"></span>
+                </button>
+              </th>
+              <th class="num compare-col">
+                <button type="button" class="th-sort" data-sort="payUsersPop">
+                  环比<span class="sort-icon" aria-hidden="true"></span>
+                </button>
+              </th>
+              <th class="num compare-col">
+                <button type="button" class="th-sort" data-sort="payUsersYoy">
+                  同比<span class="sort-icon" aria-hidden="true"></span>
+                </button>
+              </th>
+            </tr>
+          </thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="empty" id="emptyState">
+      <span class="empty-tag">待对账</span>
+      <p class="empty-title">选好日期，核对两店数字</p>
+      <p class="empty-copy">点「开始对账」后，会实时读取 <code>大店/</code> 与 <code>小店/</code> 目录里的当日表格。</p>
+      <p class="empty-hint" id="serverStatus">正在检测服务…</p>
+    </section>
+  </div>
+
+  <div class="modal" id="uploadModal" hidden>
+    <div class="modal-backdrop" data-close-upload></div>
+    <div class="modal-card upload-modal" role="dialog" aria-modal="true" aria-labelledby="uploadModalTitle">
+      <div class="upload-head">
+        <div>
+          <h2 id="uploadModalTitle">上传日期表</h2>
+          <p>大店与小店须<strong>同日成对</strong>上传，支持一次多选多个日期</p>
+        </div>
+        <button type="button" class="modal-close" id="closeUploadBtn" aria-label="关闭" data-close-upload>&times;</button>
+      </div>
+      <div class="upload-tips" role="note">
+        <p class="upload-tips-title">上传规则</p>
+        <ul>
+          <li>命名格式：<code>大店YYYYMMDD.xlsx</code> /
+            <code>小店YYYYMMDD.xlsx</code>（例：<code>大店20260714.xlsx</code>、<code>小店20260714.xlsx</code>）
+          </li>
+          <li>每个日期必须同时包含大店与小店各 1 个文件，缺一不可</li>
+          <li>多日期时，每个日期都要一一对应成对</li>
+          <li>存入文件夹时会自动改名为 <code>YYYYMMDD.xlsx</code></li>
+          <li>若对应店铺已存在该日期文件，将拒绝上传</li>
+        </ul>
+      </div>
+      <div class="upload-controls">
+        <div class="upload-file-wrap">
+          <span class="upload-file-label">选择成对文件</span>
+          <div class="upload-file-row">
+            <input type="file" id="uploadFiles"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple />
+            <button type="button" class="btn-ghost" id="uploadPickBtn">选择 .xlsx</button>
+            <span class="upload-file-meta" id="uploadFileMeta">未选择文件</span>
+          </div>
+        </div>
+        <button type="button" class="btn-primary" id="uploadBtn" disabled>开始上传</button>
+      </div>
+      <ul class="upload-list" id="uploadList" hidden></ul>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <script src="/app.js?v=29"></script>
+</body>
+
+</html>
