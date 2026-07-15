@@ -18,6 +18,7 @@
     catSelectAll: $('catSelectAll'),
     catClear: $('catClear'),
     metaHint: $('metaHint'),
+    commitId: $('commitId'),
     board: $('board'),
     metrics: $('metrics'),
     resultMeta: $('resultMeta'),
@@ -844,6 +845,9 @@
       els.endDate.value = ymdToInput(meta.maxDate)
     }
     els.metaHint.textContent = `实时数据 ${ymdToInput(meta.minDate)} ~ ${ymdToInput(meta.maxDate)} · 大店 ${meta.fileCounts['大店']} · 小店 ${meta.fileCounts['小店']}`
+    if (els.commitId && meta.commit) {
+      els.commitId.textContent = meta.commit
+    }
   }
 
   function openUploadModal() {

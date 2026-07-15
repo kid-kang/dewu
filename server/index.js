@@ -2,6 +2,8 @@ import express from 'express'
 import cors from 'cors'
 import path from 'path'
 import multer from 'multer'
+import {execFile, execFileSync} from 'child_process'
+import {promisify} from 'util'
 import {randomUUID, timingSafeEqual} from 'crypto'
 import {fileURLToPath} from 'url'
 import {
@@ -13,11 +15,29 @@ import {
   savePromoUploads,
 } from './dataService.js'
 
+const execFileAsync = promisify(execFile)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(__dirname, '..')
 const app = express()
 const PORT = process.env.PORT || 3780
 const UPLOAD_TOKEN = process.env.UPLOAD_TOKEN || '我爱康康的大宝贝'
+const DEPLOY_TOKEN = process.env.DEPLOY_TOKEN || 'USRh8epyY6GMJ2DB'
+
+function getCommitId() {
+  try {
+    return execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], {
+      cwd: root,
+      encoding: 'utf8',
+    }).trim()
+  } catch {
+    return 'unknown'
+  }
+}
+const COMMIT_ID = getCommitId()
+
+function metaWithCommit() {
+  return {...getMeta(root), commit: COMMIT_ID}
+}
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -34,11 +54,22 @@ const upload = multer({
 /** @type {Map<string, object>} */
 const jobs = new Map()
 
-function checkUploadToken(provided) {
+function checkToken(provided, expected) {
   const a = Buffer.from(String(provided ?? ''), 'utf8')
-  const b = Buffer.from(UPLOAD_TOKEN, 'utf8')
+  const b = Buffer.from(expected, 'utf8')
   if (a.length !== b.length) return false
   return timingSafeEqual(a, b)
+}
+
+function checkUploadToken(provided) {
+  return checkToken(provided, UPLOAD_TOKEN)
+}
+
+function getDeployToken(req) {
+  const auth = req.get('authorization') || ''
+  const bearer = auth.match(/^Bearer\s+(.+)$/i)
+  if (bearer) return bearer[1].trim()
+  return req.get('x-deploy-token') || req.body?.token || req.query?.token
 }
 
 app.use(cors())
@@ -67,7 +98,7 @@ setInterval(cleanupJobs, 60_000).unref()
 
 app.get('/api/meta', (_req, res) => {
   try {
-    res.json({ok: true, data: getMeta(root)})
+    res.json({ok: true, data: metaWithCommit()})
   } catch (err) {
     res.status(500).json({ok: false, error: String(err.message || err)})
   }
@@ -110,7 +141,7 @@ app.post('/api/upload', (req, res) => {
           results: batch.results,
           okCount: batch.okCount,
           failCount: batch.failCount,
-          meta: getMeta(root),
+          meta: metaWithCommit(),
         },
       })
     } catch (e) {
@@ -146,7 +177,7 @@ app.post('/api/upload-promo', (req, res) => {
           results: batch.results,
           okCount: batch.okCount,
           failCount: batch.failCount,
-          meta: getMeta(root),
+          meta: metaWithCommit(),
         },
       })
     } catch (e) {
@@ -254,6 +285,32 @@ app.post('/api/search', async (req, res) => {
   } catch (err) {
     console.error(err)
     res.status(500).json({ok: false, error: String(err.message || err)})
+  }
+})
+
+/** CI/CD webhook: verify token then git pull (node --watch will reload) */
+app.post('/pull', async (req, res) => {
+  if (!checkToken(getDeployToken(req), DEPLOY_TOKEN)) {
+    res.status(401).json({ok: false, error: '部署口令错误'})
+    return
+  }
+  try {
+    const {stdout, stderr} = await execFileAsync('git', ['pull', '--ff-only'], {
+      cwd: root,
+      timeout: 60_000,
+      env: process.env,
+    })
+    const output = [stdout, stderr].filter(Boolean).join('\n').trim()
+    console.log('[deploy] git pull ok:', output || '(empty)')
+    res.json({ok: true, output: output || 'Already up to date.'})
+  } catch (err) {
+    console.error('[deploy] git pull failed:', err)
+    res.status(500).json({
+      ok: false,
+      error: String(err.message || err),
+      stdout: err.stdout ? String(err.stdout) : undefined,
+      stderr: err.stderr ? String(err.stderr) : undefined,
+    })
   }
 })
 

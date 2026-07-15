@@ -110,6 +110,18 @@ select {
   color: var(--mark);
 }
 
+.mast-commit {
+  margin-left: 0.45em;
+  letter-spacing: 0.06em;
+  text-transform: none;
+  opacity: 0.72;
+  font-weight: 500;
+}
+
+.mast-commit:empty {
+  display: none;
+}
+
 .mast h1 {
   margin: 0;
   font-family: var(--font-display);
