@@ -70,10 +70,9 @@ function getCommitId() {
     return 'unknown'
   }
 }
-const COMMIT_ID = getCommitId()
 
 function metaWithCommit() {
-  return {...getMeta(root), commit: COMMIT_ID}
+  return {...getMeta(root), commit: getCommitId()}
 }
 
 const upload = multer({
@@ -401,7 +400,7 @@ app.listen(PORT, () => {
   openDb(root)
   const meta = getMeta(root)
   console.log(`Dewu search ready at http://localhost:${PORT}`)
-  writeLog(`server start port=${PORT} commit=${COMMIT_ID}`)
+  writeLog(`server start port=${PORT} commit=${getCommitId()}`)
   if (!meta.dbReady) {
     console.warn('尚未导入 SQLite，请先运行: npm run import:db')
   } else {
