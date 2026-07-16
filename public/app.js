@@ -272,10 +272,14 @@
   function renderMetricCard(title, lanes, options = {}) {
     const card = document.createElement('article')
     card.className = 'metric-card' + (options.merged ? ' is-merged' : '')
-    const h = document.createElement('h3')
-    h.className = 'metric-title'
-    h.textContent = title
-    card.appendChild(h)
+    if (title && !options.hideTitle) {
+      const h = document.createElement('h3')
+      h.className = 'metric-title'
+      h.textContent = title
+      card.appendChild(h)
+    } else {
+      card.classList.add('is-untitled')
+    }
     const list = document.createElement('div')
     list.className = 'lanes'
     lanes.forEach((lane) => {
@@ -306,8 +310,27 @@
     return card
   }
 
-  function renderSummary(summary, compare) {
-    lastSummary = summary
+  function sumPromoFromDetailRows(rows) {
+    let pay = 0
+    let cost = 0
+    for (const row of rows || []) {
+      pay += Number(row.recommendPayAmount) || 0
+      cost += Number(row.recommendCost) || 0
+    }
+    return {
+      recommendPayAmount: Math.round(pay * 100) / 100,
+      recommendCost: Math.round(cost * 100) / 100,
+    }
+  }
+
+  function renderSummary(summary, compare, detailRows = []) {
+    // 得物推看板 = 明细清单「推荐直接支付金额 / 推荐消耗」列累加
+    const promo = sumPromoFromDetailRows(detailRows)
+    lastSummary = {
+      ...summary,
+      recommendPayAmount: {总和: promo.recommendPayAmount},
+      recommendCost: {总和: promo.recommendCost},
+    }
     lastCompare = compare || null
     els.metrics.replaceChildren()
     if (els.compareLegend) {
@@ -319,6 +342,8 @@
         els.compareLegend.title = `环比区间 ${popRange}；同比区间 ${yoyRange}`
       }
     }
+    const promoPay = lastSummary.recommendPayAmount['总和']
+    const promoCost = lastSummary.recommendCost['总和']
     els.metrics.append(
       renderMetricCard('支付金额', [
         {kind: 'sum', label: '总和', value: summary.payAmount['总和'], metricKey: 'payAmount'},
@@ -330,22 +355,32 @@
         {kind: 'big', label: '大店', value: summary.payUsers['大店'], metricKey: 'payUsers'},
         {kind: 'small', label: '小店', value: summary.payUsers['小店'], metricKey: 'payUsers'},
       ]),
-      renderMetricCard('商详与收藏', [
+      renderMetricCard('', [
         {
           kind: 'plain',
           label: '商详访问人数',
-          value: summary.detailVisitors['大店'],
+          value: summary.detailVisitors?.['大店'] ?? 0,
           metricKey: 'detailVisitors',
           compareKind: 'big',
         },
         {
           kind: 'plain',
           label: '收藏用户数',
-          value: summary.favorites['大店'],
+          value: summary.favorites?.['大店'] ?? 0,
           metricKey: 'favorites',
           compareKind: 'big',
         },
-      ], {merged: true}),
+        {
+          kind: 'plain promo',
+          label: '推荐直接支付金额',
+          value: promoPay,
+        },
+        {
+          kind: 'plain promo',
+          label: '推荐消耗',
+          value: promoCost,
+        },
+      ], {merged: true, hideTitle: true}),
     )
   }
 
@@ -378,8 +413,12 @@
     ]
 
     function metricValue(metricKey, laneKind) {
-      // 商详 / 收藏仅大店有数据
+      // 商详 / 收藏始终取大店（含仅搜小店）
       if ((metricKey === 'detailVisitors' || metricKey === 'favorites') && laneKind !== 'big') {
+        return ''
+      }
+      // 得物推汇总仅写在「总和」行
+      if ((metricKey === 'recommendPayAmount' || metricKey === 'recommendCost') && laneKind !== 'sum') {
         return ''
       }
       const current = pickCompareValue(lastSummary, metricKey, laneKind)
@@ -405,6 +444,8 @@
       '支付用户数',
       '商详访问人数',
       '收藏用户数',
+      '推荐直接支付金额',
+      '推荐消耗',
       '支付金额环比',
       '支付金额同比',
       '支付用户数环比',
@@ -423,6 +464,8 @@
         metricValue('payUsers', kind),
         metricValue('detailVisitors', kind),
         metricValue('favorites', kind),
+        metricValue('recommendPayAmount', kind),
+        metricValue('recommendCost', kind),
         metricRate('payAmount', kind, 'pop'),
         metricRate('payAmount', kind, 'yoy'),
         metricRate('payUsers', kind, 'pop'),
@@ -448,6 +491,7 @@
       sheet['!cols'] = [
         {wch: 6},
         {wch: 12}, {wch: 12}, {wch: 14}, {wch: 12},
+        {wch: 16}, {wch: 12},
         {wch: 14}, {wch: 14}, {wch: 16}, {wch: 16},
         {wch: 18}, {wch: 18}, {wch: 16}, {wch: 16},
       ]
@@ -840,8 +884,9 @@
 
       const {summary, rows, meta: resultMeta, compare} = json.data
       lastResultMeta = resultMeta
-      renderSummary(summary, compare)
+      lastCompare = compare || null
       renderTable(rows)
+      renderSummary(summary, compare, rows)
 
       const periodText = compare && compare.type
         ? ` · ${compare.label}环比同比`

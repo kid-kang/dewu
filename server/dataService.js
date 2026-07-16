@@ -946,21 +946,58 @@ function attachRowCompare(rows, yoyRows, popRows) {
   })
 }
 
+async function loadBigTrafficRows(root, startDate, endDate, filters) {
+  const raw = await loadRowsForRange(root, ['大店'], startDate || null, endDate || null)
+  return filterRows(raw, filters)
+}
+
+function applyBigTrafficToSummary(summary, bigTrafficRows) {
+  const big = summarize(bigTrafficRows)
+  summary.detailVisitors = big.detailVisitors
+  summary.favorites = big.favorites
+  return summary
+}
+
 async function summarizeFilteredRange(root, shops, startDate, endDate, filters) {
   const raw = await loadRowsForRange(root, shops, startDate, endDate)
   const filtered = filterRows(raw, filters)
+  const needExtraBig = !shops.includes('大店')
+  const bigTrafficRows = needExtraBig
+    ? await loadBigTrafficRows(root, startDate, endDate, filters)
+    : filtered.filter((r) => r.shop === '大店')
+  const summary = summarize(filtered)
+  if (needExtraBig) applyBigTrafficToSummary(summary, bigTrafficRows)
   return {
-    summary: summarize(filtered),
-    rows: mergeDetailRows(filtered),
+    summary,
+    rows: mergeDetailRows(filtered, {trafficRows: bigTrafficRows}),
     matchedRawRows: filtered.length,
     startDate,
     endDate,
   }
 }
 
-export function mergeDetailRows(rows) {
+/**
+ * 合并明细。支付等按传入 rows 累计；商详/收藏始终取大店（可另传 trafficRows）。
+ * @param {object[]} rows
+ * @param {{ trafficRows?: object[] }} [options]
+ */
+export function mergeDetailRows(rows, options = {}) {
   /** @type {Map<string, object>} */
   const map = new Map()
+  const trafficSource = Array.isArray(options.trafficRows) ? options.trafficRows : rows
+
+  /** @type {Map<string, { detailVisitors: number, favorites: number }>} */
+  const trafficBySpuid = new Map()
+  for (const r of trafficSource) {
+    if (r.shop !== '大店') continue
+    let t = trafficBySpuid.get(r.spuid)
+    if (!t) {
+      t = {detailVisitors: 0, favorites: 0}
+      trafficBySpuid.set(r.spuid, t)
+    }
+    t.detailVisitors += r.detailVisitors
+    t.favorites += r.favorites
+  }
 
   for (const r of rows) {
     let item = map.get(r.spuid)
@@ -983,8 +1020,6 @@ export function mergeDetailRows(rows) {
     item.payUsers += r.payUsers
 
     if (r.shop === '大店') {
-      item.detailVisitors += r.detailVisitors
-      item.favorites += r.favorites
       if (!item._skuFromBig && r.sku) {
         item.sku = r.sku
         item._skuFromBig = true
@@ -996,6 +1031,14 @@ export function mergeDetailRows(rows) {
     } else {
       if (!item.sku && r.sku) item.sku = r.sku
       if (!item.category && r.category) item.category = r.category
+    }
+  }
+
+  for (const [spuid, item] of map) {
+    const t = trafficBySpuid.get(spuid)
+    if (t) {
+      item.detailVisitors = t.detailVisitors
+      item.favorites = t.favorites
     }
   }
 
@@ -1076,8 +1119,13 @@ export async function search(root, query, onProgress) {
   }
 
   const filtered = filterRows(raw, filters)
-  const rows = mergeDetailRows(filtered)
+  const needExtraBig = !shops.includes('大店')
+  const bigTrafficRows = needExtraBig
+    ? await loadBigTrafficRows(root, startDate, endDate, filters)
+    : filtered.filter((r) => r.shop === '大店')
+  const rows = mergeDetailRows(filtered, {trafficRows: bigTrafficRows})
   const summary = summarize(filtered)
+  if (needExtraBig) applyBigTrafficToSummary(summary, bigTrafficRows)
 
   const periodType = detectSearchPeriod(startDate, endDate)
   let compare = {
@@ -1140,6 +1188,16 @@ export async function search(root, query, onProgress) {
     console.warn('得物推汇总失败:', err.message)
     detailRows = attachPromoMetrics(detailRows, new Map())
   }
+
+  let recommendPayAmount = 0
+  let recommendCost = 0
+  // 与明细清单两列累加一致：只加当前结果集里的行
+  for (const row of detailRows) {
+    recommendPayAmount += Number(row.recommendPayAmount) || 0
+    recommendCost += Number(row.recommendCost) || 0
+  }
+  summary.recommendPayAmount = {总和: round2(recommendPayAmount)}
+  summary.recommendCost = {总和: round2(recommendCost)}
 
   // 对比明细已合并进主表，响应里不再回传对比期整表
   if (compare.yoy) {
