@@ -5,10 +5,10 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node --env-file=.env server/index.js",
-    "dev": "node --env-file=.env --watch server/index.js",
-    "import:db": "node --env-file=.env scripts/import-sqlite.js",
-    "migrate:sqlite": "node --env-file=.env scripts/migrate-sqlite-to-pg.js"
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "import:db": "node scripts/import-sqlite.js",
+    "migrate:sqlite": "node scripts/migrate-sqlite-to-pg.js"
   },
   "keywords": [],
   "author": "",
@@ -16,6 +16,7 @@
   "dependencies": {
     "better-sqlite3": "^12.11.1",
     "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.2.0",

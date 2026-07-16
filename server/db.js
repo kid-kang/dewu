@@ -1,3 +1,4 @@
+import './loadEnv.js'
 import {randomBytes, scryptSync, timingSafeEqual} from 'crypto'
 import pg from 'pg'
 
