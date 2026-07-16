@@ -1190,7 +1190,7 @@
       if (!res.ok || !json.ok) {
         throw new Error(json.error || `部署失败 HTTP ${res.status}`)
       }
-      showToast(json.message || '已开始拉取，完成后自动重载')
+      showToast(json.message || '已开始拉取并安装依赖，完成后自动重载')
     } catch (err) {
       showToast(String(err.message || err))
     } finally {

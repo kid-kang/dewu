@@ -365,20 +365,38 @@ app.post('/api/search', async (req, res) => {
   }
 })
 
-/** 已登录即可；立即返回，git pull 用脱附进程跑，避免 node --watch 重启杀掉 pull */
+/** 已登录即可；立即返回。脱附跑 git pull + npm i，避免 node --watch 中途重启杀掉任务 */
 app.post('/pull', requireAuth, (req, res) => {
   try {
-    const child = spawn('git', ['pull', '--ff-only'], {
-      cwd: root,
-      detached: true,
-      stdio: 'ignore',
-      env: process.env,
-    })
+    const outFd = fs.openSync(logFile, 'a')
+    const child = spawn(
+      'bash',
+      [
+        '-x',
+        '-c',
+        [
+          'echo "[deploy] $(date -Iseconds) start"',
+          'git pull --ff-only',
+          'npm install --registry=https://registry.npmmirror.com',
+          // 仅 node_modules 变更时 --watch 不一定重启，touch 一下入口文件
+          'touch server/index.js',
+          'echo "[deploy] $(date -Iseconds) done"',
+        ].join(' && '),
+      ],
+      {
+        cwd: root,
+        detached: true,
+        stdio: ['ignore', outFd, outFd],
+        env: process.env,
+      },
+    )
     child.unref()
-    console.log('[deploy] git pull queued, pid=', child.pid)
-    res.json({ok: true, message: '已开始拉取，完成后服务会自动重载'})
+    fs.closeSync(outFd)
+    console.log('[deploy] git pull + npm install queued, pid=', child.pid)
+    writeLog(`deploy queued pid=${child.pid}`)
+    res.json({ok: true, message: '已开始拉取并安装依赖，完成后服务会自动重载'})
   } catch (err) {
-    console.error('[deploy] spawn git pull failed:', err)
+    console.error('[deploy] spawn failed:', err)
     res.status(500).json({ok: false, error: String(err.message || err)})
   }
 })
