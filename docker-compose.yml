@@ -1,0 +1,49 @@
+services:
+  app:
+    build: .
+    container_name: dewu-app
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-3780}:3780"
+      - "${SSH_PORT:-2222}:22"
+    environment:
+      PORT: "3780"
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET:-dewu-jwt-secret-USRh8epyY6GMJ2DB}
+      UPLOAD_TOKEN: ${UPLOAD_TOKEN:-我爱康康的大宝贝}
+    volumes:
+      - ./:/app
+      - /app/node_modules
+      - ./docker/sshd:/ssh-config:ro
+      # git pull 用宿主机私钥（origin 是 git@github.com:...）
+      - ${HOME}/.ssh:/root/.ssh:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - dewu
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: dewu-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      PGDATA: /var/lib/postgresql/data
+    volumes:
+      - ./data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - dewu
+
+networks:
+  dewu:
+    driver: bridge

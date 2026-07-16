@@ -71,8 +71,8 @@ function getCommitId() {
   }
 }
 
-function metaWithCommit() {
-  return {...getMeta(root), commit: getCommitId()}
+async function metaWithCommit() {
+  return {...(await getMeta(root)), commit: getCommitId()}
 }
 
 const upload = multer({
@@ -155,7 +155,7 @@ function cleanupJobs() {
 }
 setInterval(cleanupJobs, 60_000).unref()
 
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
   try {
     const username = String(req.body?.username || '').trim()
     const password = String(req.body?.password || '')
@@ -163,7 +163,7 @@ app.post('/api/login', (req, res) => {
       res.status(400).json({ok: false, error: '请输入账号和密码'})
       return
     }
-    const user = authenticateUser(root, username, password)
+    const user = await authenticateUser(root, username, password)
     if (!user) {
       res.status(401).json({ok: false, error: '账号或密码错误'})
       return
@@ -178,16 +178,16 @@ app.post('/api/login', (req, res) => {
 
 app.use('/api', requireAuth)
 
-app.get('/api/meta', (_req, res) => {
+app.get('/api/meta', async (_req, res) => {
   try {
-    res.json({ok: true, data: metaWithCommit()})
+    res.json({ok: true, data: await metaWithCommit()})
   } catch (err) {
     res.status(500).json({ok: false, error: String(err.message || err)})
   }
 })
 
 app.post('/api/upload', (req, res) => {
-  upload.array('files', 40)(req, res, (err) => {
+  upload.array('files', 40)(req, res, async (err) => {
     if (err) {
       res.status(400).json({ok: false, error: String(err.message || err)})
       return
@@ -215,7 +215,7 @@ app.post('/api/upload', (req, res) => {
         return {...file, originalname: name}
       })
 
-      const batch = savePairedUploads(root, normalized)
+      const batch = await savePairedUploads(root, normalized)
       res.status(batch.ok ? 200 : 400).json({
         ok: batch.ok,
         error: batch.ok ? undefined : '校验未通过或写入失败，未写入任何文件',
@@ -223,7 +223,7 @@ app.post('/api/upload', (req, res) => {
           results: batch.results,
           okCount: batch.okCount,
           failCount: batch.failCount,
-          meta: metaWithCommit(),
+          meta: await metaWithCommit(),
         },
       })
     } catch (e) {
@@ -234,7 +234,7 @@ app.post('/api/upload', (req, res) => {
 })
 
 app.post('/api/upload-promo', (req, res) => {
-  upload.array('files', 20)(req, res, (err) => {
+  upload.array('files', 20)(req, res, async (err) => {
     if (err) {
       res.status(400).json({ok: false, error: String(err.message || err)})
       return
@@ -251,7 +251,7 @@ app.post('/api/upload-promo', (req, res) => {
         return
       }
 
-      const batch = savePromoUploads(root, files)
+      const batch = await savePromoUploads(root, files)
       res.status(batch.ok ? 200 : 400).json({
         ok: batch.ok,
         error: batch.ok ? undefined : '校验未通过或写入失败，未写入任何文件',
@@ -259,7 +259,7 @@ app.post('/api/upload-promo', (req, res) => {
           results: batch.results,
           okCount: batch.okCount,
           failCount: batch.failCount,
-          meta: metaWithCommit(),
+          meta: await metaWithCommit(),
         },
       })
     } catch (e) {
@@ -369,18 +369,19 @@ app.post('/api/search', async (req, res) => {
 app.post('/pull', requireAuth, (req, res) => {
   try {
     const outFd = fs.openSync(logFile, 'a')
+    // Alpine 无 bash，用 sh；date -Iseconds 也非 busybox 便携写法
     const child = spawn(
-      'bash',
+      'sh',
       [
         '-x',
         '-c',
         [
-          'echo "[deploy] $(date -Iseconds) start"',
+          'echo "[deploy] $(date -u +%Y-%m-%dT%H:%M:%SZ) start"',
           'git pull --ff-only',
           'npm install --registry=https://registry.npmmirror.com',
           // 仅 node_modules 变更时 --watch 不一定重启，touch 一下入口文件
           'touch server/index.js',
-          'echo "[deploy] $(date -Iseconds) done"',
+          'echo "[deploy] $(date -u +%Y-%m-%dT%H:%M:%SZ) done"',
         ].join(' && '),
       ],
       {
@@ -390,6 +391,15 @@ app.post('/pull', requireAuth, (req, res) => {
         env: process.env,
       },
     )
+    child.on('error', (err) => {
+      console.error('[deploy] spawn error:', err)
+      writeLog(`deploy spawn error: ${err.message || err}`)
+    })
+    if (!child.pid) {
+      fs.closeSync(outFd)
+      res.status(500).json({ok: false, error: '无法启动部署进程'})
+      return
+    }
     child.unref()
     fs.closeSync(outFd)
     console.log('[deploy] git pull + npm install queued, pid=', child.pid)
@@ -401,25 +411,25 @@ app.post('/pull', requireAuth, (req, res) => {
   }
 })
 
-app.listen(PORT, () => {
-  openDb(root)
+app.listen(PORT, async () => {
   try {
-    const mig = ensureCategoriesMigrated(root)
+    await openDb(root)
+    const mig = await ensureCategoriesMigrated(root)
     if (mig.skipped) {
       console.log(`[migrate] 类目已就绪，共 ${mig.total} 个（跳过重复迁移）`)
     }
   } catch (err) {
-    console.warn('[migrate] 类目迁移失败:', err.message || err)
+    console.warn('[migrate] 数据库初始化失败:', err.message || err)
   }
-  const meta = getMeta(root)
+  const meta = await getMeta(root)
   console.log(`Dewu search ready at http://localhost:${PORT}`)
   writeLog(`server start port=${PORT} commit=${getCommitId()}`)
   if (!meta.dbReady) {
-    console.warn('尚未导入 SQLite，请先运行: npm run import:db')
+    console.warn('数据库未就绪，请检查 DATABASE_URL 与 Postgres；可运行: npm run import:db')
   } else {
     console.log(`数据范围: ${meta.minDate} ~ ${meta.maxDate}`)
     console.log(`日期数: 大店 ${meta.fileCounts.大店} / 小店 ${meta.fileCounts.小店}`)
   }
   console.log('请用浏览器打开上面的地址（不要直接打开 index.html）')
-  warmCache(root)
+  await warmCache(root)
 })

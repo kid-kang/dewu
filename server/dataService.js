@@ -37,11 +37,12 @@ function promoDir(root) {
   return path.join(root, '得物推数据')
 }
 
-function requireDb(root) {
-  if (!dbExists(root)) {
-    throw new Error('尚未导入数据库，请先运行 npm run import:db')
+async function requireDb(root) {
+  const ready = await dbExists(root)
+  if (!ready) {
+    throw new Error('数据库未就绪，请检查 DATABASE_URL 与 Postgres 服务')
   }
-  return openDb(root)
+  return await openDb(root)
 }
 
 function rangesOverlap(aStart, aEnd, bStart, bEnd) {
@@ -104,7 +105,7 @@ export function listPromoFiles(root) {
  * Find existing promo coverage that conflicts with [start, end].
  * @returns {{ fileName?: string, start: string, end: string, reason: string } | null}
  */
-export function findPromoConflict(root, start, end, {ignoreFileName = null} = {}) {
+export async function findPromoConflict(root, start, end, {ignoreFileName = null} = {}) {
   for (const f of listPromoFiles(root)) {
     if (ignoreFileName && f.fileName === ignoreFileName) continue
     if (rangesOverlap(start, end, f.start, f.end)) {
@@ -116,7 +117,7 @@ export function findPromoConflict(root, start, end, {ignoreFileName = null} = {}
       }
     }
   }
-  if (dbExists(root) && promoRangeHasData(openDb(root), start, end)) {
+  if (await dbExists(root) && await promoRangeHasData(await openDb(root), start, end)) {
     return {
       start,
       end,
@@ -212,8 +213,8 @@ export async function aggregatePromoBySpuid(root, startDate, endDate, onProgress
     })
   }
   await yieldEventLoop()
-  const db = requireDb(root)
-  const map = queryPromoAgg(db, {start: startDate, end: endDate})
+  const db = await requireDb(root)
+  const map = await queryPromoAgg(db, {start: startDate, end: endDate})
   if (onProgress) {
     await onProgress({
       type: 'progress',
@@ -265,9 +266,9 @@ export function parseUploadFilename(name) {
   return {shop, date}
 }
 
-export function listShopDates(root, shop) {
-  if (!dbExists(root)) return []
-  return listShopDatesFromDb(openDb(root), shop)
+export async function listShopDates(root, shop) {
+  if (!(await dbExists(root))) return []
+  return await listShopDatesFromDb(await openDb(root), shop)
 }
 
 export function shopDateExists(root, shop, date) {
@@ -276,10 +277,10 @@ export function shopDateExists(root, shop, date) {
 }
 
 /**
- * Save buffer as YYYYMMDD.xlsx into shop folder, then upsert SQLite.
- * @returns {{ ok: boolean, error?: string, date?: string, shop?: string, rowCount?: number }}
+ * Save buffer as YYYYMMDD.xlsx into shop folder, then upsert Postgres.
+ * @returns {Promise<{ ok: boolean, error?: string, date?: string, shop?: string, rowCount?: number }>}
  */
-export function saveUploadedShopFile(root, shop, date, buffer) {
+export async function saveUploadedShopFile(root, shop, date, buffer) {
   if (!SHOPS[shop]) {
     return {ok: false, error: '店铺无效'}
   }
@@ -300,10 +301,10 @@ export function saveUploadedShopFile(root, shop, date, buffer) {
     fs.writeFileSync(tmp, buffer)
     const rows = parseXlsxRows(tmp, shop, date)
     fs.renameSync(tmp, dest)
-    const db = openDb(root)
-    upsertShopDay(db, shop, date, rows)
+    const db = await openDb(root)
+    await upsertShopDay(db, shop, date, rows)
     const catNames = rows.map((r) => r.category).filter(Boolean)
-    const catResult = upsertCategories(db, catNames)
+    const catResult = await upsertCategories(db, catNames)
     wroteDb = true
     return {
       ok: true,
@@ -326,7 +327,7 @@ export function saveUploadedShopFile(root, shop, date, buffer) {
     }
     if (wroteDb) {
       try {
-        deleteShopDay(openDb(root), shop, date)
+        await deleteShopDay(await openDb(root), shop, date)
       } catch {
         /* ignore */
       }
@@ -335,7 +336,7 @@ export function saveUploadedShopFile(root, shop, date, buffer) {
   }
 }
 
-function removeShopDateFile(root, shop, date) {
+async function removeShopDateFile(root, shop, date) {
   const dest = path.join(shopDir(root, shop), `${date}.xlsx`)
   try {
     if (fs.existsSync(dest)) fs.unlinkSync(dest)
@@ -343,7 +344,7 @@ function removeShopDateFile(root, shop, date) {
     /* ignore */
   }
   try {
-    if (dbExists(root)) deleteShopDay(openDb(root), shop, date)
+    if (await dbExists(root)) await deleteShopDay(await openDb(root), shop, date)
   } catch {
     /* ignore */
   }
@@ -354,7 +355,7 @@ function removeShopDateFile(root, shop, date) {
  * Each date must include both shops; no partial write on failure.
  * @param {{ originalname: string, buffer: Buffer }[]} files
  */
-export function savePairedUploads(root, files) {
+export async function savePairedUploads(root, files) {
   /** @type {{ name: string, ok: boolean, shop?: string, date?: string, rowCount?: number, error?: string }[]} */
   const results = []
   /** @type {{ name: string, shop: string, date: string, buffer: Buffer }[]} */
@@ -425,9 +426,9 @@ export function savePairedUploads(root, files) {
   /** @type {{ shop: string, date: string }[]} */
   const written = []
   for (const item of prepared) {
-    const saved = saveUploadedShopFile(root, item.shop, item.date, item.buffer)
+    const saved = await saveUploadedShopFile(root, item.shop, item.date, item.buffer)
     if (!saved.ok) {
-      for (const w of written) removeShopDateFile(root, w.shop, w.date)
+      for (const w of written) await removeShopDateFile(root, w.shop, w.date)
       return {
         ok: false,
         results: results.map((r) => {
@@ -466,10 +467,10 @@ export function savePairedUploads(root, files) {
 }
 
 /**
- * Save one 得物推 xlsx into 得物推数据/ and upsert SQLite.
- * @returns {{ ok: boolean, error?: string, fileName?: string, start?: string, end?: string, rowCount?: number }}
+ * Save one 得物推 xlsx into 得物推数据/ and upsert Postgres.
+ * @returns {Promise<{ ok: boolean, error?: string, fileName?: string, start?: string, end?: string, rowCount?: number }>}
  */
-export function saveUploadedPromoFile(root, fileName, buffer) {
+export async function saveUploadedPromoFile(root, fileName, buffer) {
   const parsed = parsePromoFilename(fileName)
   if (!parsed) {
     return {ok: false, error: '命名须为 YYYY.M.D-YYYY.M.D.xlsx 或 YYYY.M.D.xlsx'}
@@ -482,7 +483,7 @@ export function saveUploadedPromoFile(root, fileName, buffer) {
     return {ok: false, error: `已存在文件 ${parsed.fileName}`}
   }
 
-  const conflict = findPromoConflict(root, parsed.start, parsed.end)
+  const conflict = await findPromoConflict(root, parsed.start, parsed.end)
   if (conflict) {
     return {ok: false, error: conflict.reason}
   }
@@ -496,12 +497,12 @@ export function saveUploadedPromoFile(root, fileName, buffer) {
       throw new Error('未解析到有效数据行（请确认表头与列：日期/商品ID/消耗/直接支付金额）')
     }
     fs.renameSync(tmp, dest)
-    const db = openDb(root)
-    upsertPromoRows(db, rows, {start: parsed.start, end: parsed.end})
+    const db = await openDb(root)
+    await upsertPromoRows(db, rows, {start: parsed.start, end: parsed.end})
     wroteDb = true
     const relPath = `得物推数据/${parsed.fileName}`
     const mtimeMs = fs.statSync(dest).mtimeMs
-    setMetaFile(db, 'promo', relPath, mtimeMs)
+    await setMetaFile(db, 'promo', relPath, mtimeMs)
     return {
       ok: true,
       fileName: parsed.fileName,
@@ -522,9 +523,9 @@ export function saveUploadedPromoFile(root, fileName, buffer) {
     }
     if (wroteDb) {
       try {
-        const db = openDb(root)
-        deletePromoRange(db, parsed.start, parsed.end)
-        deleteMetaFile(db, 'promo', `得物推数据/${parsed.fileName}`)
+        const db = await openDb(root)
+        await deletePromoRange(db, parsed.start, parsed.end)
+        await deleteMetaFile(db, 'promo', `得物推数据/${parsed.fileName}`)
       } catch {
         /* ignore */
       }
@@ -533,7 +534,7 @@ export function saveUploadedPromoFile(root, fileName, buffer) {
   }
 }
 
-function removePromoFile(root, fileName, start, end) {
+async function removePromoFile(root, fileName, start, end) {
   const dest = path.join(promoDir(root), fileName)
   try {
     if (fs.existsSync(dest)) fs.unlinkSync(dest)
@@ -541,9 +542,9 @@ function removePromoFile(root, fileName, start, end) {
     /* ignore */
   }
   try {
-    const db = openDb(root)
-    if (start && end) deletePromoRange(db, start, end)
-    deleteMetaFile(db, 'promo', `得物推数据/${fileName}`)
+    const db = await openDb(root)
+    if (start && end) await deletePromoRange(db, start, end)
+    await deleteMetaFile(db, 'promo', `得物推数据/${fileName}`)
   } catch {
     /* ignore */
   }
@@ -553,7 +554,7 @@ function removePromoFile(root, fileName, start, end) {
  * Validate and save 得物推 uploads. No partial write on failure.
  * @param {{ originalname: string, buffer: Buffer }[]} files
  */
-export function savePromoUploads(root, files) {
+export async function savePromoUploads(root, files) {
   /** @type {{ name: string, ok: boolean, fileName?: string, start?: string, end?: string, rowCount?: number, error?: string }[]} */
   const results = []
   /** @type {{ name: string, fileName: string, start: string, end: string, year: number, buffer: Buffer }[]} */
@@ -589,7 +590,7 @@ export function savePromoUploads(root, files) {
     }
     seenName.set(parsed.fileName.toLowerCase(), name)
 
-    const conflict = findPromoConflict(root, parsed.start, parsed.end)
+    const conflict = await findPromoConflict(root, parsed.start, parsed.end)
     if (conflict) {
       results.push({
         name,
@@ -654,9 +655,9 @@ export function savePromoUploads(root, files) {
   /** @type {{ fileName: string, start: string, end: string }[]} */
   const written = []
   for (const item of prepared) {
-    const saved = saveUploadedPromoFile(root, item.fileName, item.buffer)
+    const saved = await saveUploadedPromoFile(root, item.fileName, item.buffer)
     if (!saved.ok) {
-      for (const w of written) removePromoFile(root, w.fileName, w.start, w.end)
+      for (const w of written) await removePromoFile(root, w.fileName, w.start, w.end)
       return {
         ok: false,
         results: results.map((r) => {
@@ -729,9 +730,9 @@ export function parseXlsxRows(filePath, shop, date) {
     .filter((r) => r.spuid)
 }
 
-export function listAvailableDates(root, shops = Object.keys(SHOPS)) {
-  if (!dbExists(root)) return []
-  return listAvailableDatesFromDb(openDb(root), shops)
+export async function listAvailableDates(root, shops = Object.keys(SHOPS)) {
+  if (!(await dbExists(root))) return []
+  return await listAvailableDatesFromDb(await openDb(root), shops)
 }
 
 /**
@@ -740,8 +741,8 @@ export function listAvailableDates(root, shops = Object.keys(SHOPS)) {
 export async function loadRowsForRange(root, shops, start, end, onProgress) {
   if (onProgress) await onProgress(0, 1, {shop: '', date: '', starting: true})
   await yieldEventLoop()
-  const db = requireDb(root)
-  const rows = queryShopRows(db, {
+  const db = await requireDb(root)
+  const rows = await queryShopRows(db, {
     start: start || null,
     end: end || null,
     shops: shops?.length ? shops : null,
@@ -1075,13 +1076,13 @@ export function mergeDetailRows(rows, options = {}) {
     .sort((a, b) => b.payAmount - a.payAmount)
 }
 
-export function getMeta(root) {
+export async function getMeta(root) {
   const promoFiles = listPromoFiles(root).map((f) => ({
     fileName: f.fileName,
     start: f.start,
     end: f.end,
   }))
-  if (!dbExists(root)) {
+  if (!(await dbExists(root))) {
     return {
       shops: Object.keys(SHOPS),
       dates: [],
@@ -1093,13 +1094,13 @@ export function getMeta(root) {
       dbReady: false,
     }
   }
-  return {...getMetaFromDb(openDb(root)), promoFiles, dbReady: true}
+  return {...await getMetaFromDb(await openDb(root)), promoFiles, dbReady: true}
 }
 
 /** 类目树来自 categories 表（全量），不再按日期/店铺实时扫表 */
 export async function getCategories(root) {
-  if (!dbExists(root)) return []
-  const names = listCategoryNames(openDb(root))
+  if (!(await dbExists(root))) return []
+  const names = await listCategoryNames(await openDb(root))
   return buildCategoryTreeFromNames(names)
 }
 
@@ -1246,16 +1247,15 @@ export async function search(root, query, onProgress) {
 }
 
 /** Open DB on startup; no longer preloads xlsx into memory. */
-export function warmCache(root) {
-  if (!dbExists(root)) {
-    console.warn('未找到 data/dewu.sqlite，请先运行: npm run import:db')
+export async function warmCache(root) {
+  if (!(await dbExists(root))) {
+    console.warn('数据库未就绪，请检查 DATABASE_URL 与 Postgres 服务')
     return
   }
   try {
-    openDb(root)
-    const meta = getMetaFromDb(openDb(root))
-    console.log(`SQLite 已就绪: ${meta.minDate || '-'} ~ ${meta.maxDate || '-'}`)
+    const meta = await getMetaFromDb(await openDb(root))
+    console.log(`Postgres 已就绪: ${meta.minDate || '-'} ~ ${meta.maxDate || '-'}`)
   } catch (err) {
-    console.warn('打开 SQLite 失败:', err.message)
+    console.warn('打开 Postgres 失败:', err.message)
   }
 }

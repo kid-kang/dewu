@@ -1,7 +1,8 @@
 node_modules/
 .cache/
-data/*.sqlite
-data/*.sqlite-*
+data/
+.env
+docker/sshd/ssh_host_*_key
 .DS_Store
 *.log
 logs/

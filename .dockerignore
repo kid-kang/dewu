@@ -1,0 +1,14 @@
+node_modules
+.git
+.cache
+logs
+backups
+data
+大店
+小店
+得物推数据
+*.xlsx
+*.log
+.DS_Store
+agent-transcripts
+docker/sshd/ssh_host_*_key

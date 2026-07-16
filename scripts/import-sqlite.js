@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 全量导入 大店/小店/得物推数据 → data/dewu.sqlite
+ * 全量导入 大店/小店/得物推数据 → Postgres
  * 用法: npm run import:db
  * 可重跑：按文件 mtime 增量跳过；强制全量加 --force
  */
@@ -69,9 +69,9 @@ function listPromoFiles() {
     .sort((a, b) => a.start.localeCompare(b.start))
 }
 
-function shouldSkip(db, kind, relPath, mtimeMs) {
+async function shouldSkip(db, kind, relPath, mtimeMs) {
   if (force) return false
-  const prev = getMetaFileMtime(db, kind, relPath)
+  const prev = await getMetaFileMtime(db, kind, relPath)
   return prev != null && prev === mtimeMs
 }
 
@@ -79,7 +79,7 @@ async function main() {
   console.log(`导入根目录: ${root}`)
   if (force) console.log('模式: --force 全量重导')
 
-  const db = openDb(root)
+  const db = await openDb(root)
   let shopImported = 0
   let shopSkipped = 0
   let shopRows = 0
@@ -93,13 +93,13 @@ async function main() {
     for (let i = 0; i < files.length; i++) {
       const f = files[i]
       const mtimeMs = fs.statSync(f.filePath).mtimeMs
-      if (shouldSkip(db, 'shop', f.relPath, mtimeMs)) {
+      if (await shouldSkip(db, 'shop', f.relPath, mtimeMs)) {
         shopSkipped += 1
         continue
       }
       const rows = parseXlsxRows(f.filePath, f.shop, f.date)
-      upsertShopDay(db, f.shop, f.date, rows)
-      setMetaFile(db, 'shop', f.relPath, mtimeMs)
+      await upsertShopDay(db, f.shop, f.date, rows)
+      await setMetaFile(db, 'shop', f.relPath, mtimeMs)
       shopImported += 1
       shopRows += rows.length
       if (shopImported % 20 === 0 || i === files.length - 1) {
@@ -112,7 +112,7 @@ async function main() {
   console.log(`\n[得物推] 共 ${promoFiles.length} 个文件`)
   for (const f of promoFiles) {
     const mtimeMs = fs.statSync(f.filePath).mtimeMs
-    if (shouldSkip(db, 'promo', f.relPath, mtimeMs)) {
+    if (await shouldSkip(db, 'promo', f.relPath, mtimeMs)) {
       promoSkipped += 1
       console.log(`  跳过 ${f.fileName}`)
       continue
@@ -120,28 +120,27 @@ async function main() {
     console.log(`  解析 ${f.fileName} …`)
     const t0 = Date.now()
     const rows = parsePromoXlsx(f.filePath, f.year)
-    upsertPromoRows(db, rows, {start: f.start, end: f.end})
-    setMetaFile(db, 'promo', f.relPath, mtimeMs)
+    await upsertPromoRows(db, rows, {start: f.start, end: f.end})
+    await setMetaFile(db, 'promo', f.relPath, mtimeMs)
     promoImported += 1
     promoRows += rows.length
     console.log(`  完成 ${f.fileName}：${rows.length} 行，${((Date.now() - t0) / 1000).toFixed(1)}s`)
   }
 
-  const meta = getMetaFromDb(db)
-  const cat = collectCategoriesFromShopDaily(db)
+  const meta = await getMetaFromDb(db)
+  const cat = await collectCategoriesFromShopDaily(db)
   console.log('\n======== 导入完成 ========')
   console.log(`店铺文件: 导入 ${shopImported}，跳过 ${shopSkipped}，写入约 ${shopRows} 行`)
   console.log(`得物推: 导入 ${promoImported}，跳过 ${promoSkipped}，写入约 ${promoRows} 行`)
-  console.log(`类目: 新增 ${cat.added}，当前共 ${listCategoryNames(db).length}`)
+  console.log(`类目: 新增 ${cat.added}，当前共 ${(await listCategoryNames(db)).length}`)
   console.log(`库内日期: ${meta.minDate || '-'} ~ ${meta.maxDate || '-'}`)
   console.log(`文件数: 大店 ${meta.fileCounts.大店} / 小店 ${meta.fileCounts.小店}`)
-  console.log(`库文件: ${path.join(root, 'data', 'dewu.sqlite')}`)
 
-  closeDb()
+  await closeDb()
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
   console.error('导入失败:', err)
-  closeDb()
+  await closeDb()
   process.exit(1)
 })

@@ -41,9 +41,9 @@ export function requireAuth(req, res, next) {
  * @param {string} username
  * @param {string} password
  */
-export function authenticateUser(root, username, password) {
-  const db = openDb(root)
-  const user = findUserByUsername(db, username)
+export async function authenticateUser(root, username, password) {
+  const db = await openDb(root)
+  const user = await findUserByUsername(db, username)
   if (!user || !verifyPassword(password, user.password_hash)) {
     return null
   }
