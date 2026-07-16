@@ -6,3 +6,4 @@ data/*.sqlite-*
 *.log
 logs/
 backups/
+*.xlsx
