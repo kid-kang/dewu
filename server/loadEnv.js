@@ -12,4 +12,6 @@ dotenv.config({
   path: path.join(root, '.env'),
   // 已有环境变量（如 docker-compose）优先，不被 .env 覆盖
   override: false,
+  // dotenv 17+ 默认会打 tip/广告，关掉
+  quiet: true,
 })
