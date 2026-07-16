@@ -57,6 +57,15 @@
     categoryEmpty: $('categoryEmpty'),
     catSelectAll: $('catSelectAll'),
     catClear: $('catClear'),
+    categoryPresetList: $('categoryPresetList'),
+    categoryPresetEmpty: $('categoryPresetEmpty'),
+    categoryPresetSaveBtn: $('categoryPresetSaveBtn'),
+    categoryPresetMenu: $('categoryPresetMenu'),
+    categoryPresetModal: $('categoryPresetModal'),
+    categoryPresetModalTitle: $('categoryPresetModalTitle'),
+    categoryPresetModalHint: $('categoryPresetModalHint'),
+    categoryPresetNameInput: $('categoryPresetNameInput'),
+    categoryPresetModalConfirm: $('categoryPresetModalConfirm'),
     metaHint: $('metaHint'),
     commitId: $('commitId'),
     board: $('board'),
@@ -120,6 +129,240 @@
   /** @type {{ file: File, name: string, ok: boolean, msg: string, start?: string, end?: string }[]} */
   let pendingPromoUploads = []
   let promoUploading = false
+  /** @type {string|null} */
+  let activeCategoryPresetId = null
+  /** @type {'save'|'rename'|null} */
+  let categoryPresetModalMode = null
+  /** @type {string|null} */
+  let categoryPresetContextId = null
+  const CATEGORY_PRESET_KEY = 'dewu_category_presets_v1'
+
+  function readCategoryPresets() {
+    try {
+      const raw = localStorage.getItem(CATEGORY_PRESET_KEY)
+      if (!raw) return []
+      const list = JSON.parse(raw)
+      if (!Array.isArray(list)) return []
+      return list
+        .filter((p) => p && typeof p.name === 'string' && Array.isArray(p.categories))
+        .map((p) => ({
+          id: String(p.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
+          name: String(p.name).trim(),
+          categories: p.categories.map((c) => String(c)),
+          updatedAt: Number(p.updatedAt) || Date.now(),
+        }))
+        .filter((p) => p.name)
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+    } catch {
+      return []
+    }
+  }
+
+  function writeCategoryPresets(list) {
+    try {
+      localStorage.setItem(CATEGORY_PRESET_KEY, JSON.stringify(list))
+    } catch (err) {
+      showToast('无法写入本机配置（浏览器存储可能已满）')
+      console.warn(err)
+    }
+  }
+
+  function hideCategoryPresetMenu() {
+    if (!els.categoryPresetMenu) return
+    els.categoryPresetMenu.hidden = true
+    categoryPresetContextId = null
+  }
+
+  function showCategoryPresetMenu(id, clientX, clientY) {
+    if (!els.categoryPresetMenu) return
+    categoryPresetContextId = id
+    const menu = els.categoryPresetMenu
+    menu.hidden = false
+    const pad = 8
+    const mw = menu.offsetWidth
+    const mh = menu.offsetHeight
+    let left = clientX
+    let top = clientY
+    if (left + mw > window.innerWidth - pad) left = window.innerWidth - mw - pad
+    if (top + mh > window.innerHeight - pad) top = window.innerHeight - mh - pad
+    if (left < pad) left = pad
+    if (top < pad) top = pad
+    menu.style.left = `${left}px`
+    menu.style.top = `${top}px`
+  }
+
+  function renderCategoryPresets() {
+    if (!els.categoryPresetList) return
+    const presets = readCategoryPresets()
+    if (els.categoryPresetEmpty) {
+      els.categoryPresetEmpty.hidden = presets.length > 0
+    }
+    const frag = document.createDocumentFragment()
+    presets.forEach((preset) => {
+      const tag = document.createElement('button')
+      tag.type = 'button'
+      tag.className = 'cat-preset-tag' + (preset.id === activeCategoryPresetId ? ' is-active' : '')
+      const count = preset.categories.length
+      tag.textContent = count ? `${preset.name}（${count}）` : `${preset.name}（全部）`
+      tag.title = (count ? preset.categories.join('、') : '全部类目') + ' · 右键可重命名/删除'
+      tag.addEventListener('click', () => {
+        hideCategoryPresetMenu()
+        applyCategoryPreset(preset.id)
+      })
+      tag.addEventListener('contextmenu', (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        showCategoryPresetMenu(preset.id, e.clientX, e.clientY)
+      })
+      frag.appendChild(tag)
+    })
+    els.categoryPresetList.replaceChildren(frag)
+  }
+
+  function applyCategoryPreset(id) {
+    const preset = readCategoryPresets().find((p) => p.id === id)
+    if (!preset) {
+      showToast('配置不存在或已删除')
+      renderCategoryPresets()
+      return
+    }
+    const leaves = new Set(collectLeafValues(categoryTree))
+    if (!preset.categories.length) {
+      selectedCategories.clear()
+    } else {
+      selectedCategories = new Set(preset.categories.filter((v) => leaves.has(v)))
+      if (!selectedCategories.size && preset.categories.length) {
+        showToast('该配置中的类目已失效，请重新勾选后保存')
+      }
+    }
+    activeCategoryPresetId = preset.id
+    refreshCategoryView()
+    renderCategoryPresets()
+    showToast(`已应用「${preset.name}」`)
+  }
+
+  function deleteCategoryPreset(id) {
+    const presets = readCategoryPresets()
+    const target = presets.find((p) => p.id === id)
+    if (!target) return
+    if (!window.confirm(`确定删除类目配置「${target.name}」？`)) return
+    const next = presets.filter((p) => p.id !== id)
+    writeCategoryPresets(next)
+    if (activeCategoryPresetId === id) activeCategoryPresetId = null
+    renderCategoryPresets()
+    showToast(`已删除「${target.name}」`)
+  }
+
+  function openCategoryPresetModal(mode, presetId) {
+    if (!els.categoryPresetModal) return
+    categoryPresetModalMode = mode
+    categoryPresetContextId = mode === 'rename' ? presetId : null
+    const isRename = mode === 'rename'
+    if (els.categoryPresetModalTitle) {
+      els.categoryPresetModalTitle.textContent = isRename ? '重命名类目配置' : '保存类目配置'
+    }
+    if (els.categoryPresetModalHint) {
+      els.categoryPresetModalHint.textContent = isRename
+        ? '修改本机已保存配置的名称'
+        : '将当前勾选的类目保存到本机浏览器'
+    }
+    let initial = ''
+    if (isRename) {
+      const preset = readCategoryPresets().find((p) => p.id === presetId)
+      if (!preset) {
+        showToast('配置不存在或已删除')
+        return
+      }
+      initial = preset.name
+    }
+    if (els.categoryPresetNameInput) {
+      els.categoryPresetNameInput.value = initial
+    }
+    els.categoryPresetModal.hidden = false
+    document.body.classList.add('modal-open')
+    window.setTimeout(() => {
+      els.categoryPresetNameInput?.focus()
+      els.categoryPresetNameInput?.select()
+    }, 0)
+  }
+
+  function closeCategoryPresetModal() {
+    if (!els.categoryPresetModal) return
+    els.categoryPresetModal.hidden = true
+    categoryPresetModalMode = null
+    if (
+      (!els.uploadModal || els.uploadModal.hidden) &&
+      (!els.promoUploadModal || els.promoUploadModal.hidden)
+    ) {
+      document.body.classList.remove('modal-open')
+    }
+  }
+
+  function confirmCategoryPresetModal() {
+    const name = String(els.categoryPresetNameInput?.value || '').trim()
+    if (!name) {
+      showToast('请填写配置名称')
+      els.categoryPresetNameInput?.focus()
+      return
+    }
+    if (categoryPresetModalMode === 'rename') {
+      renameCategoryPreset(categoryPresetContextId, name)
+      return
+    }
+    saveCategoryPresetWithName(name)
+  }
+
+  function renameCategoryPreset(id, name) {
+    const presets = readCategoryPresets()
+    const target = presets.find((p) => p.id === id)
+    if (!target) {
+      showToast('配置不存在或已删除')
+      closeCategoryPresetModal()
+      renderCategoryPresets()
+      return
+    }
+    const clash = presets.find((p) => p.id !== id && p.name === name)
+    if (clash) {
+      showToast(`已存在同名配置「${name}」`)
+      els.categoryPresetNameInput?.focus()
+      return
+    }
+    target.name = name
+    target.updatedAt = Date.now()
+    writeCategoryPresets(presets)
+    closeCategoryPresetModal()
+    renderCategoryPresets()
+    showToast(`已重命名为「${name}」`)
+  }
+
+  function saveCategoryPresetWithName(name) {
+    const categories = Array.from(selectedCategories)
+    const presets = readCategoryPresets()
+    const existed = presets.find((p) => p.name === name)
+    if (existed) {
+      if (!window.confirm(`已存在配置「${name}」，是否覆盖其类目？`)) return
+      existed.categories = categories
+      existed.updatedAt = Date.now()
+      activeCategoryPresetId = existed.id
+      writeCategoryPresets(presets)
+      closeCategoryPresetModal()
+      renderCategoryPresets()
+      showToast(`已更新配置「${name}」`)
+      return
+    }
+    const item = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name,
+      categories,
+      updatedAt: Date.now(),
+    }
+    presets.unshift(item)
+    activeCategoryPresetId = item.id
+    writeCategoryPresets(presets)
+    closeCategoryPresetModal()
+    renderCategoryPresets()
+    showToast(`已保存配置「${name}」`)
+  }
 
   function pad2(n) {
     return String(n).padStart(2, '0')
@@ -813,22 +1056,18 @@
 
   async function loadCategories() {
     const token = ++categoryFetchToken
-    const params = new URLSearchParams()
-    const start = inputToYmd(els.startDate.value)
-    const end = inputToYmd(els.endDate.value)
-    if (start) params.set('startDate', start)
-    if (end) params.set('endDate', end)
-    if (els.shop.value) params.set('shop', els.shop.value)
     els.categoryLabel.textContent = '类目加载中…'
     try {
-      const res = await apiFetch(`/api/categories?${params}`, {cache: 'no-store'})
+      const res = await apiFetch('/api/categories', {cache: 'no-store'})
       const json = await res.json()
       if (token !== categoryFetchToken) return
       if (!json.ok) throw new Error(json.error || '类目加载失败')
       categoryTree = json.data || []
       const leaves = new Set(collectLeafValues(categoryTree))
+      // 全量类目树：保留仍有效的已选类目，换日期不会清空
       selectedCategories = new Set(Array.from(selectedCategories).filter((v) => leaves.has(v)))
       refreshCategoryView()
+      renderCategoryPresets()
     } catch (err) {
       if (token !== categoryFetchToken) return
       els.categoryLabel.textContent = '类目加载失败'
@@ -1456,9 +1695,12 @@
     els.shop.value = ''
     selectedCategories.clear()
     categoryKeyword = ''
+    activeCategoryPresetId = null
     if (els.categorySearch) els.categorySearch.value = ''
+    hideCategoryPresetMenu()
     updateCategoryLabel()
     loadCategories()
+    renderCategoryPresets()
   }
 
   async function init() {
@@ -1576,7 +1818,9 @@
     els.catSelectAll.addEventListener('click', () => {
       const source = categoryKeyword.trim() ? filteredCategoryTree : categoryTree
       collectLeafValues(source).forEach((v) => selectedCategories.add(v))
+      activeCategoryPresetId = null
       refreshCategoryView()
+      renderCategoryPresets()
     })
     els.catClear.addEventListener('click', () => {
       if (categoryKeyword.trim()) {
@@ -1584,34 +1828,83 @@
       } else {
         selectedCategories.clear()
       }
+      activeCategoryPresetId = null
       refreshCategoryView()
+      renderCategoryPresets()
     })
-
-    let catTimer = 0
-    const refreshCats = () => {
-      window.clearTimeout(catTimer)
-      catTimer = window.setTimeout(loadCategories, 280)
+    if (els.categoryPresetSaveBtn) {
+      els.categoryPresetSaveBtn.addEventListener('click', () => {
+        hideCategoryPresetMenu()
+        openCategoryPresetModal('save')
+      })
     }
+    if (els.categoryPresetModalConfirm) {
+      els.categoryPresetModalConfirm.addEventListener('click', confirmCategoryPresetModal)
+    }
+    if (els.categoryPresetNameInput) {
+      els.categoryPresetNameInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          confirmCategoryPresetModal()
+        }
+      })
+    }
+    document.querySelectorAll('[data-close-cat-preset-modal]').forEach((node) => {
+      node.addEventListener('click', closeCategoryPresetModal)
+    })
+    if (els.categoryPresetMenu) {
+      els.categoryPresetMenu.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-action]')
+        if (!btn) return
+        const id = categoryPresetContextId
+        const action = btn.getAttribute('data-action')
+        hideCategoryPresetMenu()
+        if (!id) return
+        if (action === 'rename') openCategoryPresetModal('rename', id)
+        if (action === 'delete') deleteCategoryPreset(id)
+      })
+    }
+    document.addEventListener('click', (e) => {
+      if (!els.categoryPresetMenu || els.categoryPresetMenu.hidden) return
+      if (els.categoryPresetMenu.contains(e.target)) return
+      hideCategoryPresetMenu()
+    })
+    document.addEventListener('scroll', hideCategoryPresetMenu, true)
+    window.addEventListener('resize', hideCategoryPresetMenu)
+    renderCategoryPresets()
+
     els.startDate.addEventListener('change', () => {
-      refreshCats()
       updatePeriodHint()
     })
     els.endDate.addEventListener('change', () => {
-      refreshCats()
       updatePeriodHint()
     })
-    els.shop.addEventListener('change', refreshCats)
     updatePeriodHint()
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && els.promoUploadModal && !els.promoUploadModal.hidden) {
-        closePromoUploadModal()
-        return
+      if (e.key === 'Escape') {
+        if (els.categoryPresetMenu && !els.categoryPresetMenu.hidden) {
+          hideCategoryPresetMenu()
+          return
+        }
+        if (els.categoryPresetModal && !els.categoryPresetModal.hidden) {
+          closeCategoryPresetModal()
+          return
+        }
+        if (els.promoUploadModal && !els.promoUploadModal.hidden) {
+          closePromoUploadModal()
+          return
+        }
+        if (els.uploadModal && !els.uploadModal.hidden) {
+          closeUploadModal()
+          return
+        }
       }
-      if (e.key === 'Escape' && els.uploadModal && !els.uploadModal.hidden) {
-        closeUploadModal()
-        return
-      }
-      if (e.key === 'Enter' && e.target.matches('input') && e.target.id !== 'categorySearch') {
+      if (
+        e.key === 'Enter' &&
+        e.target.matches('input') &&
+        e.target.id !== 'categorySearch' &&
+        e.target.id !== 'categoryPresetNameInput'
+      ) {
         runSearch()
       }
     })

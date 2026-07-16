@@ -5,13 +5,15 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Cache-Control" content="no-store" />
-  <title>双店对账 · 得物</title>
+  <title>玄冬双店对账系统 · 得物</title>
+  <link rel="icon" type="image/webp"
+    href="https://fe-static-tx.ixiaochuan.cn/feapi/img-manage/0eb98a94_1jtkqs1ta_1_B19409F643E14801B7FA9F53F31405F67089000003E7871DA172jpg.webp" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
     href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Figtree:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
     rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css?v=33" />
+  <link rel="stylesheet" href="/styles.css?v=37" />
 </head>
 
 <body>
@@ -27,11 +29,13 @@
   <div class="page">
     <header class="mast">
       <div class="mast-brand">
-        <span class="hang-eye" aria-hidden="true"></span>
+        <img class="mast-logo"
+          src="https://fe-static-tx.ixiaochuan.cn/feapi/img-manage/0eb98a94_1jtkqs1ta_1_B19409F643E14801B7FA9F53F31405F67089000003E7871DA172jpg.webp"
+          alt="" width="52" height="52" decoding="async" />
         <div>
-          <p class="mast-kicker">得物 · 双店对账台 <button type="button" id="commitId" class="mast-commit" title="点击拉取更新"
+          <p class="mast-kicker">得物 · 玄冬双店对账系统 <button type="button" id="commitId" class="mast-commit" title="点击拉取更新"
               hidden></button></p>
-          <h1>双店对账</h1>
+          <h1 class="mast-title">玄冬双店对账系统</h1>
         </div>
       </div>
       <p class="mast-status" id="metaHint">正在连接…</p>
@@ -58,20 +62,30 @@
         </label>
         <div class="field field-cascade">
           <span>类目名称</span>
-          <button type="button" class="cascade-trigger" id="categoryTrigger" aria-expanded="false">
-            <span id="categoryLabel">全部类目</span>
-            <svg width="12" height="12" viewBox="0 0 14 14" aria-hidden="true">
-              <path d="M3 5l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" />
-            </svg>
-          </button>
-          <div class="cascade-panel" id="categoryPanel" hidden>
-            <input type="search" id="categorySearch" class="cascade-search" placeholder="搜索类目关键字" autocomplete="off" />
-            <div class="cascade-tools">
-              <button type="button" id="catSelectAll">全选</button>
-              <button type="button" id="catClear">清空</button>
+          <div class="cascade-anchor">
+            <button type="button" class="cascade-trigger" id="categoryTrigger" aria-expanded="false">
+              <span id="categoryLabel">全部类目</span>
+              <svg width="12" height="12" viewBox="0 0 14 14" aria-hidden="true">
+                <path d="M3 5l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" />
+              </svg>
+            </button>
+            <div class="cascade-panel" id="categoryPanel" hidden>
+              <input type="search" id="categorySearch" class="cascade-search" placeholder="搜索类目关键字"
+                autocomplete="off" />
+              <div class="cascade-tools">
+                <button type="button" id="catSelectAll">全选</button>
+                <button type="button" id="catClear">清空</button>
+              </div>
+              <div class="cascade-tree" id="categoryTree"></div>
+              <p class="cascade-empty" id="categoryEmpty" hidden>无匹配类目</p>
             </div>
-            <div class="cascade-tree" id="categoryTree"></div>
-            <p class="cascade-empty" id="categoryEmpty" hidden>无匹配类目</p>
+          </div>
+          <div class="cat-preset-bar" aria-label="类目配置">
+            <button type="button" class="cat-preset-save-btn" id="categoryPresetSaveBtn" title="将当前勾选的类目存为本机配置">
+              保存当前类目
+            </button>
+            <div class="cat-preset-tags" id="categoryPresetList"></div>
+            <span class="cat-preset-empty" id="categoryPresetEmpty">暂无配置 · 右键可改名/删除</span>
           </div>
         </div>
         <label class="field">
@@ -326,8 +340,35 @@
     </div>
   </div>
 
+  <div class="cat-preset-menu" id="categoryPresetMenu" hidden role="menu">
+    <button type="button" role="menuitem" data-action="rename">重命名</button>
+    <button type="button" role="menuitem" data-action="delete" class="danger">删除</button>
+  </div>
+
+  <div class="modal" id="categoryPresetModal" hidden>
+    <div class="modal-backdrop" data-close-cat-preset-modal></div>
+    <div class="modal-card cat-preset-modal-card" role="dialog" aria-modal="true"
+      aria-labelledby="categoryPresetModalTitle">
+      <div class="upload-head">
+        <div>
+          <h2 id="categoryPresetModalTitle">保存类目配置</h2>
+          <p id="categoryPresetModalHint">将当前勾选的类目保存到本机浏览器</p>
+        </div>
+        <button type="button" class="modal-close" data-close-cat-preset-modal aria-label="关闭">&times;</button>
+      </div>
+      <label class="field">
+        <span>配置名称</span>
+        <input type="text" id="categoryPresetNameInput" placeholder="例如：球鞋热销" maxlength="40" autocomplete="off" />
+      </label>
+      <div class="cat-preset-modal-actions">
+        <button type="button" class="btn-ghost" data-close-cat-preset-modal>取消</button>
+        <button type="button" class="btn-primary" id="categoryPresetModalConfirm">确定</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-  <script src="/app.js?v=44"></script>
+  <script src="/app.js?v=48"></script>
 </body>
 
 </html>

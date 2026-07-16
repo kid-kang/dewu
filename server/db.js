@@ -60,6 +60,15 @@ export function openDb(root) {
       password_hash TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS categories (
+      name TEXT PRIMARY KEY NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      id TEXT PRIMARY KEY NOT NULL,
+      applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `)
 
   ensureDefaultAdmin(db)
@@ -113,6 +122,65 @@ function ensureDefaultAdmin(db) {
  */
 export function findUserByUsername(db, username) {
   return db.prepare('SELECT id, username, password_hash FROM users WHERE username = ?').get(String(username || ''))
+}
+
+/**
+ * @param {import('better-sqlite3').Database} db
+ * @param {string} id
+ */
+export function hasMigration(db, id) {
+  const row = db.prepare('SELECT 1 AS ok FROM schema_migrations WHERE id = ?').get(String(id || ''))
+  return Boolean(row)
+}
+
+/**
+ * @param {import('better-sqlite3').Database} db
+ * @param {string} id
+ */
+export function markMigration(db, id) {
+  db.prepare('INSERT OR IGNORE INTO schema_migrations (id) VALUES (?)').run(String(id || ''))
+}
+
+/**
+ * @param {import('better-sqlite3').Database} db
+ * @returns {string[]}
+ */
+export function listCategoryNames(db) {
+  return db.prepare('SELECT name FROM categories ORDER BY name COLLATE NOCASE').all().map((r) => String(r.name))
+}
+
+/**
+ * Insert missing category full-path names. Returns newly added names.
+ * @param {import('better-sqlite3').Database} db
+ * @param {Iterable<string>} names
+ * @returns {{ added: number, addedNames: string[] }}
+ */
+export function upsertCategories(db, names) {
+  const ins = db.prepare('INSERT OR IGNORE INTO categories (name) VALUES (?)')
+  /** @type {string[]} */
+  const addedNames = []
+  const tx = db.transaction((list) => {
+    for (const raw of list) {
+      const name = String(raw || '').trim()
+      if (!name || /^null(-null)*$/i.test(name)) continue
+      const info = ins.run(name)
+      if (info.changes > 0) addedNames.push(name)
+    }
+  })
+  tx(names || [])
+  return {added: addedNames.length, addedNames}
+}
+
+/**
+ * Collect DISTINCT category from shop_daily into categories table.
+ * @param {import('better-sqlite3').Database} db
+ */
+export function collectCategoriesFromShopDaily(db) {
+  const rows = db.prepare(`
+    SELECT DISTINCT category AS name FROM shop_daily
+    WHERE category IS NOT NULL AND TRIM(category) != ''
+  `).all()
+  return upsertCategories(db, rows.map((r) => r.name))
 }
 
 export function closeDb() {

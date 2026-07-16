@@ -16,6 +16,7 @@ import {
 } from './dataService.js'
 import {openDb} from './db.js'
 import {authenticateUser, requireAuth, signUserToken} from './auth.js'
+import {ensureCategoriesMigrated} from './migrateCategories.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(__dirname, '..')
@@ -268,14 +269,9 @@ app.post('/api/upload-promo', (req, res) => {
   })
 })
 
-app.get('/api/categories', async (req, res) => {
+app.get('/api/categories', async (_req, res) => {
   try {
-    const {startDate, endDate, shop} = req.query
-    const tree = await getCategories(root, {
-      startDate: startDate || null,
-      endDate: endDate || null,
-      shop: shop || '',
-    })
+    const tree = await getCategories(root)
     res.json({ok: true, data: tree})
   } catch (err) {
     res.status(500).json({ok: false, error: String(err.message || err)})
@@ -389,6 +385,14 @@ app.post('/pull', requireAuth, (req, res) => {
 
 app.listen(PORT, () => {
   openDb(root)
+  try {
+    const mig = ensureCategoriesMigrated(root)
+    if (mig.skipped) {
+      console.log(`[migrate] 类目已就绪，共 ${mig.total} 个（跳过重复迁移）`)
+    }
+  } catch (err) {
+    console.warn('[migrate] 类目迁移失败:', err.message || err)
+  }
   const meta = getMeta(root)
   console.log(`Dewu search ready at http://localhost:${PORT}`)
   writeLog(`server start port=${PORT} commit=${getCommitId()}`)

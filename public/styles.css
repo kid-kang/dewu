@@ -132,16 +132,17 @@ select {
   gap: 0.95rem;
 }
 
-.hang-eye {
-  width: 2.6rem;
-  height: 2.6rem;
-  border-radius: 999px;
+.mast-logo {
+  width: 3.15rem;
+  height: 3.15rem;
+  border-radius: 0.85rem;
   border: 2px solid var(--ink);
-  background:
-    radial-gradient(circle at center, transparent 34%, var(--ink) 35% 48%, transparent 49%),
-    var(--white);
+  object-fit: cover;
+  object-position: center 18%;
+  background: #fff8f0;
   box-shadow: 3px 3px 0 var(--mark-soft);
   flex-shrink: 0;
+  display: block;
 }
 
 .mast-kicker {
@@ -177,14 +178,38 @@ select {
   display: none;
 }
 
-.mast h1 {
+.mast h1,
+.mast-title {
   margin: 0;
   font-family: var(--font-display);
   font-size: clamp(2.4rem, 6vw, 3.6rem);
   font-weight: 800;
   line-height: 0.95;
   letter-spacing: -0.03em;
-  color: var(--ink);
+  background-image: linear-gradient(
+    118deg,
+    #0f3548 0%,
+    #1a5f7a 28%,
+    #2a9d8f 52%,
+    #c45f28 78%,
+    #d94f30 100%
+  );
+  background-size: 160% 100%;
+  background-position: 0% 50%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.45));
+  animation: mast-title-sheen 2.6s ease-out 0.15s both;
+}
+
+@keyframes mast-title-sheen {
+  from {
+    background-position: 0% 50%;
+  }
+  to {
+    background-position: 100% 50%;
+  }
 }
 
 .mast-status {
@@ -520,6 +545,10 @@ body.modal-open {
   text-align: left;
 }
 
+.cascade-anchor {
+  position: relative;
+}
+
 .cascade-panel {
   position: absolute;
   z-index: 40;
@@ -655,6 +684,132 @@ body.modal-open {
 .period-hint.is-match {
   color: var(--mark);
   font-weight: 600;
+}
+
+.cat-preset-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.28rem 0.5rem;
+  margin-top: 0.15rem;
+}
+
+.cat-preset-save-btn {
+  flex: 0 0 auto;
+  order: 2;
+  margin-left: auto;
+  height: 1.45rem;
+  padding: 0 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 0.68rem;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.cat-preset-save-btn:hover {
+  border-color: var(--mark);
+  color: var(--mark);
+}
+
+.cat-preset-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  align-items: center;
+  min-width: 0;
+  flex: 1 1 auto;
+  order: 1;
+}
+
+.cat-preset-tag {
+  max-width: 9rem;
+  height: 1.45rem;
+  padding: 0 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #f8fbfe;
+  color: var(--ink);
+  font-size: 0.68rem;
+  line-height: 1;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cat-preset-tag:hover {
+  border-color: var(--mark);
+  color: var(--mark);
+}
+
+.cat-preset-tag.is-active {
+  border-color: var(--mark);
+  background: var(--mark-soft);
+  color: var(--mark);
+  font-weight: 600;
+}
+
+.cat-preset-empty {
+  order: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--mute);
+  font-size: 0.66rem;
+  line-height: 1.3;
+}
+
+.cat-preset-menu {
+  position: fixed;
+  z-index: 100;
+  min-width: 6.5rem;
+  padding: 0.2rem;
+  background: var(--white);
+  border: 1.5px solid var(--ink);
+  box-shadow: 4px 4px 0 rgba(42, 157, 143, 0.16);
+  display: grid;
+  gap: 0.05rem;
+}
+
+.cat-preset-menu[hidden] {
+  display: none;
+}
+
+.cat-preset-menu button {
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.74rem;
+  color: var(--ink);
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.cat-preset-menu button:hover {
+  background: var(--mark-soft);
+  color: var(--mark);
+}
+
+.cat-preset-menu button.danger:hover {
+  background: rgba(192, 57, 43, 0.08);
+  color: #c0392b;
+}
+
+.cat-preset-modal-card {
+  width: min(22rem, 100%);
+  max-height: none;
+}
+
+.cat-preset-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  margin-top: 1rem;
 }
 
 .btn-primary,

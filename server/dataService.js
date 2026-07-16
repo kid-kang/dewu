@@ -16,6 +16,8 @@ import {
   listShopDatesFromDb,
   listAvailableDatesFromDb,
   getMetaFromDb,
+  listCategoryNames,
+  upsertCategories,
 } from './db.js'
 
 const SHOPS = {
@@ -300,8 +302,17 @@ export function saveUploadedShopFile(root, shop, date, buffer) {
     fs.renameSync(tmp, dest)
     const db = openDb(root)
     upsertShopDay(db, shop, date, rows)
+    const catNames = rows.map((r) => r.category).filter(Boolean)
+    const catResult = upsertCategories(db, catNames)
     wroteDb = true
-    return {ok: true, shop, date, rowCount: rows.length}
+    return {
+      ok: true,
+      shop,
+      date,
+      rowCount: rows.length,
+      newCategories: catResult.added,
+      newCategoryNames: catResult.addedNames,
+    }
   } catch (err) {
     try {
       if (fs.existsSync(tmp)) fs.unlinkSync(tmp)
@@ -440,6 +451,7 @@ export function savePairedUploads(root, files) {
         ...results[idx],
         ok: true,
         rowCount: saved.rowCount || 0,
+        newCategories: saved.newCategories || 0,
       }
     }
   }
@@ -743,10 +755,18 @@ function categoryPath(category) {
 }
 
 export function buildCategoryTree(rows) {
+  return buildCategoryTreeFromNames(rows.map((r) => r?.category).filter(Boolean))
+}
+
+/**
+ * @param {Iterable<string>} names full category paths like 服装-外套-冲锋衣
+ */
+export function buildCategoryTreeFromNames(names) {
   const root = {}
-  for (const row of rows) {
-    if (!row.category) continue
-    const parts = categoryPath(row.category)
+  for (const name of names || []) {
+    const category = String(name || '').trim()
+    if (!category) continue
+    const parts = categoryPath(category)
     let node = root
     for (const part of parts) {
       if (!node[part]) node[part] = {}
@@ -1076,10 +1096,11 @@ export function getMeta(root) {
   return {...getMetaFromDb(openDb(root)), promoFiles, dbReady: true}
 }
 
-export async function getCategories(root, {startDate, endDate, shop} = {}, onProgress) {
-  const shops = shop && SHOPS[shop] ? [shop] : Object.keys(SHOPS)
-  const rows = await loadRowsForRange(root, shops, startDate || null, endDate || null, onProgress)
-  return buildCategoryTree(rows)
+/** 类目树来自 categories 表（全量），不再按日期/店铺实时扫表 */
+export async function getCategories(root) {
+  if (!dbExists(root)) return []
+  const names = listCategoryNames(openDb(root))
+  return buildCategoryTreeFromNames(names)
 }
 
 /**

@@ -15,6 +15,8 @@ import {
   getMetaFileMtime,
   setMetaFile,
   getMetaFromDb,
+  collectCategoriesFromShopDaily,
+  listCategoryNames,
 } from '../server/db.js'
 import {
   parseDateFromFilename,
@@ -126,9 +128,11 @@ async function main() {
   }
 
   const meta = getMetaFromDb(db)
+  const cat = collectCategoriesFromShopDaily(db)
   console.log('\n======== 导入完成 ========')
   console.log(`店铺文件: 导入 ${shopImported}，跳过 ${shopSkipped}，写入约 ${shopRows} 行`)
   console.log(`得物推: 导入 ${promoImported}，跳过 ${promoSkipped}，写入约 ${promoRows} 行`)
+  console.log(`类目: 新增 ${cat.added}，当前共 ${listCategoryNames(db).length}`)
   console.log(`库内日期: ${meta.minDate || '-'} ~ ${meta.maxDate || '-'}`)
   console.log(`文件数: 大店 ${meta.fileCounts.大店} / 小店 ${meta.fileCounts.小店}`)
   console.log(`库文件: ${path.join(root, 'data', 'dewu.sqlite')}`)
