@@ -813,18 +813,22 @@ body.modal-open {
 }
 
 .lane-main {
-  display: grid;
-  grid-template-columns: 2.8rem 1fr;
-  align-items: center;
-  gap: 0.35rem;
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .lane-compare {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.45rem 0.75rem;
-  margin-top: 0.28rem;
-  padding-left: 2.8rem;
+  justify-content: flex-end;
+  gap: 0.35rem 0.65rem;
+  margin: 0;
+  margin-left: auto;
+  padding: 0;
+  flex: 0 1 auto;
   font-family: var(--font-mono);
   font-size: 0.72rem;
   font-weight: 600;
@@ -880,11 +884,11 @@ body.modal-open {
 }
 
 .metric-card.is-merged .lane-main {
-  grid-template-columns: minmax(6.5rem, auto) 1fr auto;
+  gap: 0.65rem;
 }
 
-.metric-card.is-merged .lane-compare {
-  padding-left: 0;
+.metric-card.is-untitled {
+  padding-top: 0.95rem;
 }
 
 .lane.plain .lane-tag {
@@ -894,12 +898,21 @@ body.modal-open {
   letter-spacing: 0.02em;
 }
 
+.lane.promo .lane-value {
+  color: #b08900;
+}
+
 .lanes {
   display: grid;
   gap: 0;
 }
 
 .lane {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.35rem 0.75rem;
+  flex-wrap: wrap;
   padding: 0.42rem 0.15rem;
   border-top: 1px dashed var(--line);
 }
@@ -943,7 +956,7 @@ body.modal-open {
   font-size: 1.02rem;
   letter-spacing: -0.02em;
   color: var(--mark);
-  text-align: right;
+  text-align: left;
 }
 
 .lane.big .lane-value {
