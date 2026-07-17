@@ -1428,18 +1428,19 @@ body.modal-open {
   }
 }
 
-/* 宠物固定到屏幕右下角；缩放由 JS 按两侧留白设置 --dewu-pet-scale */
+/* 宠物固定右下角；JS 只改舞台宽高放大 canvas，气泡/菜单保持 1x */
 .dewu-pet-stage {
   top: auto !important;
   right: 8px !important;
   bottom: 12px !important;
   left: auto !important;
+  overflow: visible !important;
   transform-origin: bottom right !important;
 }
 
 .dewu-pet-status {
   top: auto !important;
   right: 0 !important;
-  bottom: calc(12px + (120px * var(--dewu-pet-scale, 1))) !important;
+  bottom: calc(12px + var(--dewu-pet-height, 240px)) !important;
   left: auto !important;
 }
