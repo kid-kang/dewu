@@ -13,7 +13,7 @@
   <link
     href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Figtree:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
     rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css?v=38" />
+  <link rel="stylesheet" href="/styles.css?v=44" />
 </head>
 
 <body>
@@ -33,8 +33,8 @@
           src="https://fe-static-tx.ixiaochuan.cn/feapi/img-manage/0eb98a94_1jtkqs1ta_1_B19409F643E14801B7FA9F53F31405F67089000003E7871DA172jpg.webp"
           alt="" width="52" height="52" decoding="async" />
         <div>
-          <p class="mast-kicker">得物 · 玄冬双店对账系统 <button type="button" id="commitId" class="mast-commit" title="点击拉取更新并安装依赖"
-              hidden></button></p>
+          <p class="mast-kicker">得物 · 玄冬双店对账系统 <button type="button" id="commitId" class="mast-commit"
+              title="点击拉取更新并安装依赖" hidden></button></p>
           <h1 class="mast-title">玄冬双店对账系统</h1>
         </div>
       </div>
@@ -144,7 +144,7 @@
       <div class="section-head">
         <div class="section-head-main">
           <h2>明细清单</h2>
-          <p>相同 SPUID 已合并；商详/收藏始终计大店（含仅搜小店）；末三列为得物推数据汇总；单日/整周/整月时显示各指标环比与同比</p>
+          <p>相同 SPUID 已合并；商详/收藏始终计大店（含仅搜小店）；得物推三项含环比同比；单日/整周/整月时显示各指标环比与同比</p>
         </div>
         <div class="section-head-actions">
           <button type="button" class="btn-board-action" id="exportDetailBtn" title="导出明细清单为 Excel">
@@ -221,17 +221,47 @@
               </th>
               <th class="num promo-col">
                 <button type="button" class="th-sort" data-sort="recommendPayAmount">
-                  推荐直接支付金额<span class="sort-icon" aria-hidden="true"></span>
+                  得物推直接支付金额<span class="sort-icon" aria-hidden="true"></span>
+                </button>
+              </th>
+              <th class="num compare-col promo-col">
+                <button type="button" class="th-sort" data-sort="recommendPayAmountPop">
+                  环比<span class="sort-icon" aria-hidden="true"></span>
+                </button>
+              </th>
+              <th class="num compare-col promo-col">
+                <button type="button" class="th-sort" data-sort="recommendPayAmountYoy">
+                  同比<span class="sort-icon" aria-hidden="true"></span>
                 </button>
               </th>
               <th class="num promo-col">
                 <button type="button" class="th-sort" data-sort="recommendCost">
-                  推荐消耗<span class="sort-icon" aria-hidden="true"></span>
+                  得物推消耗<span class="sort-icon" aria-hidden="true"></span>
+                </button>
+              </th>
+              <th class="num compare-col promo-col">
+                <button type="button" class="th-sort" data-sort="recommendCostPop">
+                  环比<span class="sort-icon" aria-hidden="true"></span>
+                </button>
+              </th>
+              <th class="num compare-col promo-col">
+                <button type="button" class="th-sort" data-sort="recommendCostYoy">
+                  同比<span class="sort-icon" aria-hidden="true"></span>
                 </button>
               </th>
               <th class="num promo-col">
                 <button type="button" class="th-sort" data-sort="recommendRoi">
-                  推荐直接支付ROI<span class="sort-icon" aria-hidden="true"></span>
+                  得物推直接支付ROI<span class="sort-icon" aria-hidden="true"></span>
+                </button>
+              </th>
+              <th class="num compare-col promo-col">
+                <button type="button" class="th-sort" data-sort="recommendRoiPop">
+                  环比<span class="sort-icon" aria-hidden="true"></span>
+                </button>
+              </th>
+              <th class="num compare-col promo-col">
+                <button type="button" class="th-sort" data-sort="recommendRoiYoy">
+                  同比<span class="sort-icon" aria-hidden="true"></span>
                 </button>
               </th>
             </tr>
@@ -368,7 +398,9 @@
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-  <script src="/app.js?v=48"></script>
+  <script src="/vendor/l2d-widget/index.min.js"></script>
+  <script src="/pet.js?v=6"></script>
+  <script src="/app.js?v=51"></script>
 </body>
 
 </html>

@@ -536,7 +536,9 @@
       tag.textContent = lane.label
       const val = document.createElement('span')
       val.className = 'lane-value'
-      val.textContent = formatNumber(lane.value)
+      val.textContent = Object.prototype.hasOwnProperty.call(lane, 'display')
+        ? lane.display
+        : formatNumber(lane.value)
       main.append(tag, val)
       row.appendChild(main)
 
@@ -563,16 +565,18 @@
     return {
       recommendPayAmount: Math.round(pay * 100) / 100,
       recommendCost: Math.round(cost * 100) / 100,
+      recommendRoi: cost === 0 ? null : Math.round((pay / cost) * 100) / 100,
     }
   }
 
   function renderSummary(summary, compare, detailRows = []) {
-    // 得物推看板 = 明细清单「推荐直接支付金额 / 推荐消耗」列累加
+    // 得物推看板 = 明细清单「得物推直接支付金额 / 得物推消耗」列累加
     const promo = sumPromoFromDetailRows(detailRows)
     lastSummary = {
       ...summary,
       recommendPayAmount: {总和: promo.recommendPayAmount},
       recommendCost: {总和: promo.recommendCost},
+      recommendRoi: {总和: promo.recommendRoi},
     }
     lastCompare = compare || null
     els.metrics.replaceChildren()
@@ -587,6 +591,7 @@
     }
     const promoPay = lastSummary.recommendPayAmount['总和']
     const promoCost = lastSummary.recommendCost['总和']
+    const promoRoi = lastSummary.recommendRoi['总和']
     els.metrics.append(
       renderMetricCard('支付金额', [
         {kind: 'sum', label: '总和', value: summary.payAmount['总和'], metricKey: 'payAmount'},
@@ -615,13 +620,25 @@
         },
         {
           kind: 'plain promo',
-          label: '推荐直接支付金额',
+          label: '得物推直接支付金额',
           value: promoPay,
+          metricKey: 'recommendPayAmount',
+          compareKind: 'sum',
         },
         {
           kind: 'plain promo',
-          label: '推荐消耗',
+          label: '得物推消耗',
           value: promoCost,
+          metricKey: 'recommendCost',
+          compareKind: 'sum',
+        },
+        {
+          kind: 'plain promo',
+          label: '得物推直接支付ROI',
+          value: promoRoi,
+          display: promoRoi == null || Number.isNaN(Number(promoRoi)) ? '—' : formatNumber(promoRoi),
+          metricKey: 'recommendRoi',
+          compareKind: 'sum',
         },
       ], {merged: true, hideTitle: true}),
     )
@@ -661,7 +678,10 @@
         return ''
       }
       // 得物推汇总仅写在「总和」行
-      if ((metricKey === 'recommendPayAmount' || metricKey === 'recommendCost') && laneKind !== 'sum') {
+      if (
+        (metricKey === 'recommendPayAmount' || metricKey === 'recommendCost' || metricKey === 'recommendRoi')
+        && laneKind !== 'sum'
+      ) {
         return ''
       }
       const current = pickCompareValue(lastSummary, metricKey, laneKind)
@@ -670,6 +690,12 @@
 
     function metricRate(metricKey, laneKind, which) {
       if ((metricKey === 'detailVisitors' || metricKey === 'favorites') && laneKind !== 'big') {
+        return ''
+      }
+      if (
+        (metricKey === 'recommendPayAmount' || metricKey === 'recommendCost' || metricKey === 'recommendRoi')
+        && laneKind !== 'sum'
+      ) {
         return ''
       }
       if (!hasCompare) return ''
@@ -687,8 +713,9 @@
       '支付用户数',
       '商详访问人数',
       '收藏用户数',
-      '推荐直接支付金额',
-      '推荐消耗',
+      '得物推直接支付金额',
+      '得物推消耗',
+      '得物推直接支付ROI',
       '支付金额环比',
       '支付金额同比',
       '支付用户数环比',
@@ -697,6 +724,12 @@
       '商详访问人数同比',
       '收藏用户数环比',
       '收藏用户数同比',
+      '得物推直接支付金额环比',
+      '得物推直接支付金额同比',
+      '得物推消耗环比',
+      '得物推消耗同比',
+      '得物推直接支付ROI环比',
+      '得物推直接支付ROI同比',
     ]
 
     const rows = [header]
@@ -709,6 +742,7 @@
         metricValue('favorites', kind),
         metricValue('recommendPayAmount', kind),
         metricValue('recommendCost', kind),
+        metricValue('recommendRoi', kind),
         metricRate('payAmount', kind, 'pop'),
         metricRate('payAmount', kind, 'yoy'),
         metricRate('payUsers', kind, 'pop'),
@@ -717,6 +751,12 @@
         metricRate('detailVisitors', kind, 'yoy'),
         metricRate('favorites', kind, 'pop'),
         metricRate('favorites', kind, 'yoy'),
+        metricRate('recommendPayAmount', kind, 'pop'),
+        metricRate('recommendPayAmount', kind, 'yoy'),
+        metricRate('recommendCost', kind, 'pop'),
+        metricRate('recommendCost', kind, 'yoy'),
+        metricRate('recommendRoi', kind, 'pop'),
+        metricRate('recommendRoi', kind, 'yoy'),
       ])
     })
     return rows
@@ -734,9 +774,11 @@
       sheet['!cols'] = [
         {wch: 6},
         {wch: 12}, {wch: 12}, {wch: 14}, {wch: 12},
-        {wch: 16}, {wch: 12},
+        {wch: 16}, {wch: 12}, {wch: 16},
         {wch: 14}, {wch: 14}, {wch: 16}, {wch: 16},
         {wch: 18}, {wch: 18}, {wch: 16}, {wch: 16},
+        {wch: 20}, {wch: 20}, {wch: 14}, {wch: 14},
+        {wch: 20}, {wch: 20},
       ]
       const book = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(book, sheet, '汇总看板')
@@ -774,9 +816,15 @@
       '支付用户数',
       '支付用户数环比',
       '支付用户数同比',
-      '推荐直接支付金额',
-      '推荐消耗',
-      '推荐直接支付ROI',
+      '得物推直接支付金额',
+      '得物推直接支付金额环比',
+      '得物推直接支付金额同比',
+      '得物推消耗',
+      '得物推消耗环比',
+      '得物推消耗同比',
+      '得物推直接支付ROI',
+      '得物推直接支付ROI环比',
+      '得物推直接支付ROI同比',
     ]
     const sorted = getSortedRows(lastRows)
     const rows = [header]
@@ -798,10 +846,16 @@
         rateCellExport(row.payUsersPop),
         rateCellExport(row.payUsersYoy),
         row.recommendPayAmount == null ? '' : Number(row.recommendPayAmount),
+        rateCellExport(row.recommendPayAmountPop),
+        rateCellExport(row.recommendPayAmountYoy),
         row.recommendCost == null ? '' : Number(row.recommendCost),
+        rateCellExport(row.recommendCostPop),
+        rateCellExport(row.recommendCostYoy),
         row.recommendRoi == null || Number.isNaN(Number(row.recommendRoi))
           ? ''
           : Number(row.recommendRoi),
+        rateCellExport(row.recommendRoiPop),
+        rateCellExport(row.recommendRoiYoy),
       ])
     })
     return rows
@@ -822,7 +876,9 @@
         {wch: 14}, {wch: 18}, {wch: 18},
         {wch: 12}, {wch: 16}, {wch: 16},
         {wch: 12}, {wch: 16}, {wch: 16},
-        {wch: 16}, {wch: 12}, {wch: 16},
+        {wch: 16}, {wch: 20}, {wch: 20},
+        {wch: 12}, {wch: 14}, {wch: 14},
+        {wch: 16}, {wch: 20}, {wch: 20},
       ]
       const book = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(book, sheet, '明细清单')
@@ -867,9 +923,9 @@
     return formatRate(rate)
   }
 
-  function appendRateCell(tr, rate) {
+  function appendRateCell(tr, rate, extraClass = '') {
     const td = document.createElement('td')
-    td.className = 'num compare-col'
+    td.className = `num compare-col${extraClass ? ` ${extraClass}` : ''}`
     const info = formatRateText(rate)
     const span = document.createElement('span')
     span.className = `rate-cell ${info.cls}`
@@ -912,9 +968,11 @@
       })
 
       const promoMetrics = [
-        {text: formatNumber(row.recommendPayAmount)},
-        {text: formatNumber(row.recommendCost)},
+        {key: 'recommendPayAmount', value: row.recommendPayAmount},
+        {key: 'recommendCost', value: row.recommendCost},
         {
+          key: 'recommendRoi',
+          value: row.recommendRoi,
           text: row.recommendRoi == null || Number.isNaN(Number(row.recommendRoi))
             ? '—'
             : formatNumber(row.recommendRoi),
@@ -923,8 +981,10 @@
       promoMetrics.forEach((m) => {
         const td = document.createElement('td')
         td.className = 'num promo-col'
-        td.textContent = m.text
+        td.textContent = m.text != null ? m.text : formatNumber(m.value)
         tr.appendChild(td)
+        appendRateCell(tr, row[`${m.key}Pop`], 'promo-col')
+        appendRateCell(tr, row[`${m.key}Yoy`], 'promo-col')
       })
 
       frag.appendChild(tr)
@@ -1135,13 +1195,19 @@
       els.tableSection.hidden = false
       els.emptyState.hidden = true
       stopProgress(true)
-      if (!rows.length) showToast('没有匹配数据')
-      else showToast(`对账完成 · ${rows.length} 个 SPU`)
+      if (!rows.length) {
+        showToast('没有匹配数据')
+        window.DewuPet?.say?.('这次没捞到数据，换个条件试试？')
+      } else {
+        showToast(`对账完成 · ${rows.length} 个 SPU`)
+        window.DewuPet?.say?.(`对账完成！共 ${rows.length} 个 SPU`)
+      }
     } catch (err) {
       console.error(err)
       stopProgress(false)
       const msg = err.name === 'AbortError' ? '检索超时，请缩小日期范围' : (err.message || '检索失败')
       showToast(msg)
+      window.DewuPet?.say?.('对账卡住了，稍后再试一下～')
       if (els.serverStatus) {
         els.serverStatus.textContent = `检索失败：${msg}`
         els.serverStatus.className = 'empty-hint bad'
@@ -1717,24 +1783,31 @@
 
       els.serverStatus.textContent = '已连接：数据来自 大店/ 与 小店/ 的 xlsx'
       els.serverStatus.className = 'empty-hint ok'
-      loadCategories();
-
-      // 点击整个日期框即可打开日历
-      [els.startDate, els.endDate].forEach((input) => {
-        input.addEventListener('click', () => {
-          if (typeof input.showPicker === 'function') {
-            try {input.showPicker()} catch (_) { /* ignore */}
-          }
-        })
-      })
+      loadCategories()
     } catch (err) {
       if (String(err.message || '').includes('登录')) return
       meta = null
       els.metaHint.textContent = '未连接服务'
-      els.serverStatus.innerHTML = `连接失败。请在目录 <code>C:\\Users\\l\\Desktop\\dewu\\dewu</code> 运行 <code>npm start</code>，然后打开 <code>http://localhost:3780</code>`
+      els.serverStatus.innerHTML = `连接失败。请确认已运行服务并打开 <code>http://localhost:3780</code>`
       els.serverStatus.className = 'empty-hint bad'
       showToast('服务未连接')
     }
+
+    try {
+      window.DewuPet?.init?.()
+    } catch (err) {
+      console.warn('[pet] 初始化失败', err)
+    }
+
+    // 点击整个日期框即可打开日历（前面需分号，避免 ASI 把上一行与 [ 粘成成员访问）
+    ;[els.startDate, els.endDate].forEach((input) => {
+      if (!input) return
+      input.addEventListener('click', () => {
+        if (typeof input.showPicker === 'function') {
+          try {input.showPicker()} catch (_) { /* ignore */}
+        }
+      })
+    })
 
     els.searchBtn.addEventListener('click', runSearch)
     els.resetBtn.addEventListener('click', resetFilters)

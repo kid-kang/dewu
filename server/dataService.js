@@ -239,6 +239,41 @@ function attachPromoMetrics(detailRows, promoMap) {
   })
 }
 
+/** 与明细清单累加一致：只加当前结果集里的行 */
+function sumPromoFromRows(rows) {
+  let recommendPayAmount = 0
+  let recommendCost = 0
+  for (const row of rows || []) {
+    recommendPayAmount += Number(row.recommendPayAmount) || 0
+    recommendCost += Number(row.recommendCost) || 0
+  }
+  return {
+    recommendPayAmount: {总和: round2(recommendPayAmount)},
+    recommendCost: {总和: round2(recommendCost)},
+    recommendRoi: {
+      总和: recommendCost === 0 ? null : round2(recommendPayAmount / recommendCost),
+    },
+  }
+}
+
+async function attachPromoToComparePeriod(root, period) {
+  if (!period || period.error || !period.startDate || !period.endDate) return period
+  try {
+    const promoMap = await aggregatePromoBySpuid(root, period.startDate, period.endDate)
+    period.rows = attachPromoMetrics(period.rows || [], promoMap)
+    if (period.summary) {
+      Object.assign(period.summary, sumPromoFromRows(period.rows))
+    }
+  } catch (err) {
+    console.warn('对比期得物推汇总失败:', err.message)
+    period.rows = attachPromoMetrics(period.rows || [], new Map())
+    if (period.summary) {
+      Object.assign(period.summary, sumPromoFromRows(period.rows))
+    }
+  }
+  return period
+}
+
 
 export function parseDateFromFilename(name) {
   const base = path.basename(String(name || ''))
@@ -953,7 +988,15 @@ function rowsToSpuidMap(rows) {
 function attachRowCompare(rows, yoyRows, popRows) {
   const yoyMap = rowsToSpuidMap(yoyRows || [])
   const popMap = rowsToSpuidMap(popRows || [])
-  const keys = ['payAmount', 'detailVisitors', 'favorites', 'payUsers']
+  const keys = [
+    'payAmount',
+    'detailVisitors',
+    'favorites',
+    'payUsers',
+    'recommendPayAmount',
+    'recommendCost',
+    'recommendRoi',
+  ]
 
   return rows.map((row) => {
     const yoy = yoyMap.get(String(row.spuid))
@@ -1191,18 +1234,10 @@ export async function search(root, query, onProgress) {
     }
   }
 
-  let detailRows = rows
-  if (periodType) {
-    detailRows = attachRowCompare(
-      rows,
-      compare.yoy?.rows || [],
-      compare.pop?.rows || [],
-    )
-  }
-
   if (onProgress) {
     await onProgress({type: 'progress', phase: 'promo', done: 0, total: 1, label: '汇总得物推数据'})
   }
+  let detailRows = rows
   try {
     const promoMap = await aggregatePromoBySpuid(root, startDate || null, endDate || null, onProgress)
     detailRows = attachPromoMetrics(detailRows, promoMap)
@@ -1211,15 +1246,23 @@ export async function search(root, query, onProgress) {
     detailRows = attachPromoMetrics(detailRows, new Map())
   }
 
-  let recommendPayAmount = 0
-  let recommendCost = 0
-  // 与明细清单两列累加一致：只加当前结果集里的行
-  for (const row of detailRows) {
-    recommendPayAmount += Number(row.recommendPayAmount) || 0
-    recommendCost += Number(row.recommendCost) || 0
+  // 对比期也挂上得物推，再算明细环比/同比（含得物推三项）
+  if (periodType) {
+    if (onProgress) {
+      await onProgress({type: 'progress', phase: 'promo', done: 0, total: 1, label: '汇总对比期得物推'})
+    }
+    await Promise.all([
+      attachPromoToComparePeriod(root, compare.yoy),
+      attachPromoToComparePeriod(root, compare.pop),
+    ])
+    detailRows = attachRowCompare(
+      detailRows,
+      compare.yoy?.rows || [],
+      compare.pop?.rows || [],
+    )
   }
-  summary.recommendPayAmount = {总和: round2(recommendPayAmount)}
-  summary.recommendCost = {总和: round2(recommendCost)}
+
+  Object.assign(summary, sumPromoFromRows(detailRows))
 
   // 对比明细已合并进主表，响应里不再回传对比期整表
   if (compare.yoy) {

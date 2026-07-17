@@ -1231,8 +1231,36 @@ body.modal-open {
   display: table-cell;
 }
 
+.data-table th.promo-col,
 .data-table td.promo-col {
-  color: #8a6a00;
+  background: rgba(176, 137, 0, 0.1);
+  color: #7a5c00;
+  box-shadow: inset 1px 0 0 rgba(176, 137, 0, 0.22);
+}
+
+.data-table th.promo-col {
+  color: #6b4f00;
+}
+
+.data-table th.promo-col .th-sort:hover {
+  color: #9a7400;
+}
+
+.data-table td.promo-col .rate-cell.cmp-up {
+  color: #b33a2b;
+}
+
+.data-table td.promo-col .rate-cell.cmp-down {
+  color: #187a52;
+}
+
+.data-table td.promo-col .rate-cell.cmp-flat,
+.data-table td.promo-col .rate-cell.cmp-na {
+  color: #9a8240;
+}
+
+.data-table tbody tr:hover td.promo-col {
+  background: rgba(176, 137, 0, 0.16);
 }
 
 .rate-cell {
@@ -1391,4 +1419,27 @@ body.modal-open {
     animation: none !important;
     transition: none !important;
   }
+}
+
+/* 有页面宠物时多留一点底边，减少挡住表格底部 */
+@media (min-width: 861px) {
+  body:has(canvas) .page {
+    margin-bottom: 5.5rem;
+  }
+}
+
+/* 宠物固定到屏幕右下角；缩放由 JS 按两侧留白设置 --dewu-pet-scale */
+.dewu-pet-stage {
+  top: auto !important;
+  right: 8px !important;
+  bottom: 12px !important;
+  left: auto !important;
+  transform-origin: bottom right !important;
+}
+
+.dewu-pet-status {
+  top: auto !important;
+  right: 0 !important;
+  bottom: calc(12px + (120px * var(--dewu-pet-scale, 1))) !important;
+  left: auto !important;
 }

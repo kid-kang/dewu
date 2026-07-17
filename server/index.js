@@ -137,6 +137,9 @@ app.use((req, res, next) => {
 app.use('/vendor/xlsx', express.static(path.join(root, 'node_modules/xlsx/dist'), {
   maxAge: '7d',
 }))
+app.use('/vendor/l2d-widget', express.static(path.join(root, 'node_modules/l2d-widget/dist'), {
+  maxAge: '7d',
+}))
 app.use(express.static(path.join(root, 'public'), {
   etag: false,
   lastModified: false,
