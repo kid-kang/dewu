@@ -13,7 +13,9 @@
   <link
     href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Figtree:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
     rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css?v=45" />
+  <link rel="stylesheet" href="/vendor/flatpickr/flatpickr.min.css" />
+  <link rel="stylesheet" href="/vendor/flatpickr/plugins/monthSelect/style.css" />
+  <link rel="stylesheet" href="/styles.css?v=50" />
 </head>
 
 <body>
@@ -44,14 +46,20 @@
     <section class="clip" aria-label="搜索条件">
       <div class="clip-rail" aria-hidden="true"></div>
       <div class="filter-grid">
-        <label class="field">
-          <span>开始日期</span>
-          <input type="date" id="startDate" />
-        </label>
-        <label class="field">
-          <span>结束日期</span>
-          <input type="date" id="endDate" />
-        </label>
+        <div class="field field-date-range">
+          <span>日期范围</span>
+          <div class="date-range-row">
+            <select id="dateMode" class="date-mode-select" aria-label="日期维度">
+              <option value="week">自然周</option>
+              <option value="month">自然月</option>
+              <option value="custom" selected>自定义</option>
+            </select>
+            <input type="text" id="datePicker" class="date-picker-input" placeholder="请选择日期" readonly
+              autocomplete="off" />
+          </div>
+          <input type="hidden" id="startDate" />
+          <input type="hidden" id="endDate" />
+        </div>
         <label class="field">
           <span>SPUID</span>
           <input type="text" id="spuid" placeholder="模糊匹配" autocomplete="off" />
@@ -98,11 +106,7 @@
         </label>
       </div>
       <div class="filter-actions">
-        <div class="period-presets" aria-label="当前日期区间类型标记">
-          <span class="period-mark" id="presetDay" title="开始日期等于结束日期时为单日">单日</span>
-          <span class="period-mark" id="presetWeek" title="起止恰好为一整周（周一至周日）时为整周">整周</span>
-          <span class="period-mark" id="presetMonth" title="起止恰好为一整月时为整月">整月</span>
-        </div>
+        <p class="period-hint" id="periodHint">自然周（周一至周日）/ 自然月 时，汇总看板会显示环比与同比；自定义需恰好为单日、整周或整月</p>
         <div class="filter-actions-right">
           <button type="button" class="btn-ghost" id="openPromoUploadBtn" title="上传得物推数据表">上传得物推</button>
           <button type="button" class="btn-ghost" id="openUploadBtn" title="上传大店/小店日期表">上传日期表</button>
@@ -110,7 +114,6 @@
           <button type="button" class="btn-primary" id="searchBtn">开始对账</button>
         </div>
       </div>
-      <p class="period-hint" id="periodHint">单日 / 整周（周一至周日）/ 整月 时，汇总看板会显示环比与同比</p>
       <div class="inline-progress" id="inlineProgress" hidden>
         <div class="progress-track">
           <div class="progress-fill" id="progressFill"></div>
@@ -343,7 +346,7 @@
           <li>示例：区间 <code>2026.7.15-2026.9.30.xlsx</code>；单日
             <code>2026.7.15.xlsx</code> 或 <code>2026.7.15-2026.7.15.xlsx</code>
           </li>
-          <li>表结构：第 1 行说明、第 2 行表头、第 3 行起为数据；需含日期、商品ID、消耗、直接支付金额等列</li>
+          <li>表结构：第 1 行说明、第 2 行表头、第 3 行起为数据；需含日期、商品ID、消耗、曝光、点击、直接支付金额、商详访问数等列</li>
           <li>若文件名日期与已有得物推文件<strong>重叠</strong>（含完全相同），将拒绝上传</li>
           <li>同一次多选时，彼此日期区间也不可重叠</li>
           <li>上传成功后会写入 <code>得物推数据/</code> 并同步 SQLite</li>
@@ -398,9 +401,13 @@
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <script src="/vendor/flatpickr/flatpickr.min.js"></script>
+  <script src="/vendor/flatpickr/l10n/zh.js"></script>
+  <script src="/vendor/flatpickr/plugins/weekSelect/weekSelect.js"></script>
+  <script src="/vendor/flatpickr/plugins/monthSelect/index.js"></script>
   <script src="/vendor/l2d-widget/index.min.js"></script>
-  <script src="/pet.js?v=11"></script>
-  <script src="/app.js?v=51"></script>
+  <script src="/pet.js?v=14"></script>
+  <script src="/app.js?v=54"></script>
 </body>
 
 </html>

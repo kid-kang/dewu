@@ -140,6 +140,9 @@ app.use('/vendor/xlsx', express.static(path.join(root, 'node_modules/xlsx/dist')
 app.use('/vendor/l2d-widget', express.static(path.join(root, 'node_modules/l2d-widget/dist'), {
   maxAge: '7d',
 }))
+app.use('/vendor/flatpickr', express.static(path.join(root, 'node_modules/flatpickr/dist'), {
+  maxAge: '7d',
+}))
 app.use(express.static(path.join(root, 'public'), {
   etag: false,
   lastModified: false,

@@ -47,7 +47,10 @@ export async function openDb(_root) {
       date TEXT NOT NULL,
       spuid TEXT NOT NULL,
       cost DOUBLE PRECISION NOT NULL DEFAULT 0,
-      direct_pay DOUBLE PRECISION NOT NULL DEFAULT 0
+      direct_pay DOUBLE PRECISION NOT NULL DEFAULT 0,
+      impressions DOUBLE PRECISION NOT NULL DEFAULT 0,
+      clicks DOUBLE PRECISION NOT NULL DEFAULT 0,
+      detail_visits DOUBLE PRECISION NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_promo_daily_date_spuid ON promo_daily(date, spuid);
 
@@ -76,9 +79,19 @@ export async function openDb(_root) {
   `)
 
   await ensureDefaultAdmin(pool)
+  await ensurePromoDailyExtraColumns(pool)
 
   cachedPool = pool
   return pool
+}
+
+/** 兼容旧库：为 promo_daily 补齐曝光/点击/商详访问数列 */
+async function ensurePromoDailyExtraColumns(pool) {
+  await pool.query(`
+    ALTER TABLE promo_daily ADD COLUMN IF NOT EXISTS impressions DOUBLE PRECISION NOT NULL DEFAULT 0;
+    ALTER TABLE promo_daily ADD COLUMN IF NOT EXISTS clicks DOUBLE PRECISION NOT NULL DEFAULT 0;
+    ALTER TABLE promo_daily ADD COLUMN IF NOT EXISTS detail_visits DOUBLE PRECISION NOT NULL DEFAULT 0;
+  `)
 }
 
 const DEFAULT_ADMIN_USER = 'admin'
@@ -335,7 +348,7 @@ export async function deleteMetaFile(db, kind, relPath) {
 
 /**
  * @param {pg.Pool | pg.PoolClient} client
- * @param {Array<[string, string, number, number]>} rows
+ * @param {Array<[string, string, number, number, number, number, number]>} rows
  */
 async function insertPromoRows(client, rows) {
   const list = (rows || []).filter((row) => row?.[0] && row?.[1])
@@ -346,11 +359,20 @@ async function insertPromoRows(client, rows) {
     const params = []
     let p = 1
     for (const row of chunk) {
-      values.push(`($${p++}, $${p++}, $${p++}, $${p++})`)
-      params.push(row[0], String(row[1]), Number(row[2]) || 0, Number(row[3]) || 0)
+      values.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++})`)
+      params.push(
+        row[0],
+        String(row[1]),
+        Number(row[2]) || 0,
+        Number(row[3]) || 0,
+        Number(row[4]) || 0,
+        Number(row[5]) || 0,
+        Number(row[6]) || 0,
+      )
     }
     await client.query(
-      `INSERT INTO promo_daily (date, spuid, cost, direct_pay) VALUES ${values.join(',')}`,
+      `INSERT INTO promo_daily (date, spuid, cost, direct_pay, impressions, clicks, detail_visits)
+       VALUES ${values.join(',')}`,
       params,
     )
   }
@@ -359,7 +381,8 @@ async function insertPromoRows(client, rows) {
 /**
  * Replace promo rows for a set of dates covered by one source file.
  * @param {pg.Pool} db
- * @param {Array<[string, string, number, number]>} rows compact [ymd, spuid, cost, directPay]
+ * @param {Array<[string, string, number, number, number, number, number]>} rows
+ *   compact [ymd, spuid, cost, directPay, impressions, clicks, detailVisits]
  * @param {{ start?: string, end?: string } | null} [range] optional date range to clear first
  */
 export async function upsertPromoRows(db, rows, range = null) {
@@ -473,10 +496,24 @@ export async function queryShopRows(db, {start = null, end = null, shops = null}
 /**
  * Aggregate promo by spuid within date range.
  * @param {pg.Pool} db
- * @returns {Promise<Map<string, { recommendPayAmount: number, recommendCost: number, recommendRoi: number|null }>>}
+ * @returns {Promise<Map<string, {
+ *   recommendPayAmount: number,
+ *   recommendCost: number,
+ *   recommendRoi: number|null,
+ *   recommendImpressions: number,
+ *   recommendClicks: number,
+ *   recommendDetailVisits: number,
+ * }>>}
  */
 export async function queryPromoAgg(db, {start = null, end = null} = {}) {
-  /** @type {Map<string, { recommendPayAmount: number, recommendCost: number, recommendRoi: number|null }>} */
+  /** @type {Map<string, {
+   *   recommendPayAmount: number,
+   *   recommendCost: number,
+   *   recommendRoi: number|null,
+   *   recommendImpressions: number,
+   *   recommendClicks: number,
+   *   recommendDetailVisits: number,
+   * }>} */
   const map = new Map()
   if (!start || !end) return map
 
@@ -484,7 +521,10 @@ export async function queryPromoAgg(db, {start = null, end = null} = {}) {
     `
     SELECT spuid,
            SUM(direct_pay) AS direct_pay,
-           SUM(cost) AS cost
+           SUM(cost) AS cost,
+           SUM(impressions) AS impressions,
+           SUM(clicks) AS clicks,
+           SUM(detail_visits) AS detail_visits
     FROM promo_daily
     WHERE date >= $1 AND date <= $2
     GROUP BY spuid
@@ -495,10 +535,16 @@ export async function queryPromoAgg(db, {start = null, end = null} = {}) {
   for (const r of rows) {
     const pay = Math.round((Number(r.direct_pay) || 0) * 100) / 100
     const cost = Math.round((Number(r.cost) || 0) * 100) / 100
+    const impressions = Math.round((Number(r.impressions) || 0) * 100) / 100
+    const clicks = Math.round((Number(r.clicks) || 0) * 100) / 100
+    const detailVisits = Math.round((Number(r.detail_visits) || 0) * 100) / 100
     map.set(String(r.spuid), {
       recommendPayAmount: pay,
       recommendCost: cost,
       recommendRoi: cost === 0 ? null : Math.round((pay / cost) * 100) / 100,
+      recommendImpressions: impressions,
+      recommendClicks: clicks,
+      recommendDetailVisits: detailVisits,
     })
   }
   return map

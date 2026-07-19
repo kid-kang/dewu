@@ -42,8 +42,10 @@
 
   const $ = (id) => document.getElementById(id)
   const els = {
+    datePicker: $('datePicker'),
     startDate: $('startDate'),
     endDate: $('endDate'),
+    dateMode: $('dateMode'),
     spuid: $('spuid'),
     sku: $('sku'),
     shop: $('shop'),
@@ -101,10 +103,13 @@
     promoUploadList: $('promoUploadList'),
     periodHint: $('periodHint'),
     compareLegend: $('compareLegend'),
-    presetDay: $('presetDay'),
-    presetWeek: $('presetWeek'),
-    presetMonth: $('presetMonth'),
   }
+
+  /** @type {'week'|'month'|'custom'} */
+  let dateMode = 'custom'
+  /** @type {any} */
+  let datePicker = null
+  let syncingPicker = false
 
   let meta = null
   let selectedCategories = new Set()
@@ -395,6 +400,29 @@
     return `${y}${m}${d}`
   }
 
+  function formatInputDate(dt) {
+    return ymdToInput(dateToYmd(dt))
+  }
+
+  /** 自然周：周一至周日 */
+  function weekBounds(date) {
+    const d = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+    const day = d.getDay()
+    const offset = day === 0 ? -6 : 1 - day
+    const start = new Date(d)
+    start.setDate(d.getDate() + offset)
+    const end = new Date(start)
+    end.setDate(start.getDate() + 6)
+    return {start, end}
+  }
+
+  /** 自然月：当月 1 号至月末 */
+  function monthBounds(date) {
+    const start = new Date(date.getFullYear(), date.getMonth(), 1)
+    const end = new Date(date.getFullYear(), date.getMonth() + 1, 0)
+    return {start, end}
+  }
+
   function detectPeriodType(startYmd, endYmd) {
     if (!startYmd || !endYmd) return null
     if (startYmd === endYmd) return 'day'
@@ -412,20 +440,194 @@
     return null
   }
 
+  function setHiddenRange(startYmd, endYmd) {
+    if (els.startDate) els.startDate.value = ymdToInput(startYmd)
+    if (els.endDate) els.endDate.value = ymdToInput(endYmd)
+    updatePeriodHint()
+  }
+
+  function getFlatpickrLocale() {
+    const base = (window.flatpickr && window.flatpickr.l10ns && window.flatpickr.l10ns.zh) || {}
+    return {...base, firstDayOfWeek: 1}
+  }
+
+  function destroyDatePicker() {
+    if (datePicker) {
+      datePicker.destroy()
+      datePicker = null
+    }
+  }
+
+  function writePickerDisplay(start, end) {
+    if (!els.datePicker) return
+    const s = formatInputDate(start)
+    const e = formatInputDate(end)
+    if (dateMode === 'month') {
+      els.datePicker.value = `${start.getFullYear()}年${start.getMonth() + 1}月`
+    } else if (dateMode === 'week') {
+      els.datePicker.value = `${s} 至 ${e}`
+    } else if (s === e) {
+      els.datePicker.value = s
+    } else {
+      els.datePicker.value = `${s} 至 ${e}`
+    }
+  }
+
+  function applyRangeFromDates(start, end) {
+    setHiddenRange(dateToYmd(start), dateToYmd(end))
+    writePickerDisplay(start, end)
+  }
+
+  function defaultAnchorDate() {
+    if (meta?.maxDate) return ymdToDate(meta.maxDate)
+    return new Date()
+  }
+
+  function currentRangeOrDefault() {
+    const startYmd = inputToYmd(els.startDate?.value)
+    const endYmd = inputToYmd(els.endDate?.value)
+    if (startYmd && endYmd) {
+      return {start: ymdToDate(startYmd), end: ymdToDate(endYmd)}
+    }
+    const anchor = defaultAnchorDate()
+    return {start: anchor, end: anchor}
+  }
+
+  function snapRangeForMode(mode, start, end) {
+    if (mode === 'week') return weekBounds(start)
+    if (mode === 'month') return monthBounds(start)
+    return {start, end}
+  }
+
+  function onDatePickerChange(selectedDates) {
+    if (syncingPicker) return
+    if (!selectedDates?.length) return
+
+    if (dateMode === 'week') {
+      const {start, end} = weekBounds(selectedDates[0])
+      applyRangeFromDates(start, end)
+      return
+    }
+    if (dateMode === 'month') {
+      const {start, end} = monthBounds(selectedDates[0])
+      applyRangeFromDates(start, end)
+      return
+    }
+    if (selectedDates.length === 1) {
+      applyRangeFromDates(selectedDates[0], selectedDates[0])
+      return
+    }
+    if (selectedDates.length >= 2) {
+      const a = selectedDates[0]
+      const b = selectedDates[1]
+      applyRangeFromDates(a <= b ? a : b, a <= b ? b : a)
+    }
+  }
+
+  function initDatePicker() {
+    if (!els.datePicker || typeof window.flatpickr !== 'function') return
+
+    destroyDatePicker()
+
+    const current = currentRangeOrDefault()
+    const {start, end} = snapRangeForMode(dateMode, current.start, current.end)
+    applyRangeFromDates(start, end)
+
+    const common = {
+      locale: getFlatpickrLocale(),
+      allowInput: false,
+      disableMobile: true,
+      animate: true,
+      minDate: meta?.minDate ? ymdToInput(meta.minDate) : undefined,
+      maxDate: meta?.maxDate ? ymdToInput(meta.maxDate) : undefined,
+      onChange: onDatePickerChange,
+      onReady(_dates, _str, instance) {
+        // 周/月模式下用自有文案覆盖插件默认展示
+        if (dateMode !== 'custom') writePickerDisplay(start, end)
+        else instance.input.value = start.getTime() === end.getTime()
+          ? formatInputDate(start)
+          : `${formatInputDate(start)} 至 ${formatInputDate(end)}`
+      },
+      onValueUpdate(selectedDates, _str, instance) {
+        if (dateMode === 'custom') return
+        if (!selectedDates?.length) return
+        const bounds = dateMode === 'week'
+          ? weekBounds(selectedDates[0])
+          : monthBounds(selectedDates[0])
+        syncingPicker = true
+        if (dateMode === 'month') {
+          instance.input.value = `${bounds.start.getFullYear()}年${bounds.start.getMonth() + 1}月`
+        } else {
+          instance.input.value = `${formatInputDate(bounds.start)} 至 ${formatInputDate(bounds.end)}`
+        }
+        syncingPicker = false
+      },
+    }
+
+    if (dateMode === 'week') {
+      datePicker = window.flatpickr(els.datePicker, {
+        ...common,
+        mode: 'single',
+        dateFormat: 'Y-m-d',
+        defaultDate: start,
+        plugins: [window.weekSelect()],
+      })
+    } else if (dateMode === 'month') {
+      datePicker = window.flatpickr(els.datePicker, {
+        ...common,
+        mode: 'single',
+        defaultDate: start,
+        plugins: [
+          window.monthSelectPlugin({
+            shorthand: false,
+            dateFormat: 'Y-m',
+            altFormat: 'Y年m月',
+            theme: 'light',
+          }),
+        ],
+      })
+    } else {
+      datePicker = window.flatpickr(els.datePicker, {
+        ...common,
+        mode: 'range',
+        dateFormat: 'Y-m-d',
+        defaultDate: start.getTime() === end.getTime() ? start : [start, end],
+        showMonths: window.matchMedia('(max-width: 720px)').matches ? 1 : 2,
+      })
+    }
+  }
+
+  function setDateMode(mode, {rebuild = true} = {}) {
+    if (mode !== 'week' && mode !== 'month' && mode !== 'custom') return
+    dateMode = mode
+    if (els.dateMode && els.dateMode.value !== mode) {
+      els.dateMode.value = mode
+    }
+    if (rebuild) initDatePicker()
+    else updatePeriodHint()
+  }
+
   function updatePeriodHint() {
-    const start = inputToYmd(els.startDate.value)
-    const end = inputToYmd(els.endDate.value)
+    const start = inputToYmd(els.startDate?.value)
+    const end = inputToYmd(els.endDate?.value)
     const type = detectPeriodType(start, end)
-    const labels = {day: '单日', week: '整周', month: '整月'}
-    if (els.presetDay) els.presetDay.classList.toggle('is-active', type === 'day')
-    if (els.presetWeek) els.presetWeek.classList.toggle('is-active', type === 'week')
-    if (els.presetMonth) els.presetMonth.classList.toggle('is-active', type === 'month')
+    const labels = {day: '单日', week: '自然周', month: '自然月'}
     if (!els.periodHint) return
+    if (dateMode === 'week') {
+      els.periodHint.textContent = '当前为自然周（周一至周日），汇总看板将展示环比与同比'
+      els.periodHint.classList.add('is-match')
+      return
+    }
+    if (dateMode === 'month') {
+      els.periodHint.textContent = '当前为自然月，汇总看板将展示环比与同比'
+      els.periodHint.classList.add('is-match')
+      return
+    }
     if (type) {
-      els.periodHint.textContent = `当前为${labels[type]}搜索，汇总看板将展示环比（上一周期）与同比（去年同期）`
+      els.periodHint.textContent = `当前自定义区间为${labels[type]}，汇总看板将展示环比与同比`
       els.periodHint.classList.add('is-match')
     } else {
-      els.periodHint.textContent = '单日 / 整周（周一至周日）/ 整月 时，汇总看板会显示环比与同比'
+      els.periodHint.textContent = '自定义区间需恰好为单日 / 自然周（周一至周日）/ 自然月，汇总看板才会显示环比与同比'
       els.periodHint.classList.remove('is-match')
     }
   }
@@ -558,25 +760,48 @@
   function sumPromoFromDetailRows(rows) {
     let pay = 0
     let cost = 0
+    let impressions = 0
+    let clicks = 0
+    let detailVisits = 0
     for (const row of rows || []) {
       pay += Number(row.recommendPayAmount) || 0
       cost += Number(row.recommendCost) || 0
+      impressions += Number(row.recommendImpressions) || 0
+      clicks += Number(row.recommendClicks) || 0
+      detailVisits += Number(row.recommendDetailVisits) || 0
     }
     return {
       recommendPayAmount: Math.round(pay * 100) / 100,
       recommendCost: Math.round(cost * 100) / 100,
       recommendRoi: cost === 0 ? null : Math.round((pay / cost) * 100) / 100,
+      recommendImpressions: Math.round(impressions * 100) / 100,
+      recommendClicks: Math.round(clicks * 100) / 100,
+      recommendDetailVisits: Math.round(detailVisits * 100) / 100,
     }
   }
 
+  function isPromoBoardMetric(metricKey) {
+    return (
+      metricKey === 'recommendPayAmount'
+      || metricKey === 'recommendCost'
+      || metricKey === 'recommendRoi'
+      || metricKey === 'recommendImpressions'
+      || metricKey === 'recommendClicks'
+      || metricKey === 'recommendDetailVisits'
+    )
+  }
+
   function renderSummary(summary, compare, detailRows = []) {
-    // 得物推看板 = 明细清单「得物推直接支付金额 / 得物推消耗」列累加
+    // 得物推看板 = 当前明细结果集对应 SPU 的得物推指标累加（逻辑同「得物推消耗」）
     const promo = sumPromoFromDetailRows(detailRows)
     lastSummary = {
       ...summary,
       recommendPayAmount: {总和: promo.recommendPayAmount},
       recommendCost: {总和: promo.recommendCost},
       recommendRoi: {总和: promo.recommendRoi},
+      recommendImpressions: {总和: promo.recommendImpressions},
+      recommendClicks: {总和: promo.recommendClicks},
+      recommendDetailVisits: {总和: promo.recommendDetailVisits},
     }
     lastCompare = compare || null
     els.metrics.replaceChildren()
@@ -592,6 +817,9 @@
     const promoPay = lastSummary.recommendPayAmount['总和']
     const promoCost = lastSummary.recommendCost['总和']
     const promoRoi = lastSummary.recommendRoi['总和']
+    const promoImpressions = lastSummary.recommendImpressions['总和']
+    const promoClicks = lastSummary.recommendClicks['总和']
+    const promoDetailVisits = lastSummary.recommendDetailVisits['总和']
     els.metrics.append(
       renderMetricCard('支付金额', [
         {kind: 'sum', label: '总和', value: summary.payAmount['总和'], metricKey: 'payAmount'},
@@ -618,6 +846,8 @@
           metricKey: 'favorites',
           compareKind: 'big',
         },
+      ], {merged: true, hideTitle: true}),
+      renderMetricCard('得物推', [
         {
           kind: 'plain promo',
           label: '得物推直接支付金额',
@@ -640,7 +870,28 @@
           metricKey: 'recommendRoi',
           compareKind: 'sum',
         },
-      ], {merged: true, hideTitle: true}),
+        {
+          kind: 'plain promo',
+          label: '曝光（次）',
+          value: promoImpressions,
+          metricKey: 'recommendImpressions',
+          compareKind: 'sum',
+        },
+        {
+          kind: 'plain promo',
+          label: '点击（次）',
+          value: promoClicks,
+          metricKey: 'recommendClicks',
+          compareKind: 'sum',
+        },
+        {
+          kind: 'plain promo',
+          label: '商详访问数（次）',
+          value: promoDetailVisits,
+          metricKey: 'recommendDetailVisits',
+          compareKind: 'sum',
+        },
+      ]),
     )
   }
 
@@ -678,10 +929,7 @@
         return ''
       }
       // 得物推汇总仅写在「总和」行
-      if (
-        (metricKey === 'recommendPayAmount' || metricKey === 'recommendCost' || metricKey === 'recommendRoi')
-        && laneKind !== 'sum'
-      ) {
+      if (isPromoBoardMetric(metricKey) && laneKind !== 'sum') {
         return ''
       }
       const current = pickCompareValue(lastSummary, metricKey, laneKind)
@@ -692,10 +940,7 @@
       if ((metricKey === 'detailVisitors' || metricKey === 'favorites') && laneKind !== 'big') {
         return ''
       }
-      if (
-        (metricKey === 'recommendPayAmount' || metricKey === 'recommendCost' || metricKey === 'recommendRoi')
-        && laneKind !== 'sum'
-      ) {
+      if (isPromoBoardMetric(metricKey) && laneKind !== 'sum') {
         return ''
       }
       if (!hasCompare) return ''
@@ -716,6 +961,9 @@
       '得物推直接支付金额',
       '得物推消耗',
       '得物推直接支付ROI',
+      '曝光（次）',
+      '点击（次）',
+      '商详访问数（次）',
       '支付金额环比',
       '支付金额同比',
       '支付用户数环比',
@@ -730,6 +978,12 @@
       '得物推消耗同比',
       '得物推直接支付ROI环比',
       '得物推直接支付ROI同比',
+      '曝光（次）环比',
+      '曝光（次）同比',
+      '点击（次）环比',
+      '点击（次）同比',
+      '商详访问数（次）环比',
+      '商详访问数（次）同比',
     ]
 
     const rows = [header]
@@ -743,6 +997,9 @@
         metricValue('recommendPayAmount', kind),
         metricValue('recommendCost', kind),
         metricValue('recommendRoi', kind),
+        metricValue('recommendImpressions', kind),
+        metricValue('recommendClicks', kind),
+        metricValue('recommendDetailVisits', kind),
         metricRate('payAmount', kind, 'pop'),
         metricRate('payAmount', kind, 'yoy'),
         metricRate('payUsers', kind, 'pop'),
@@ -757,6 +1014,12 @@
         metricRate('recommendCost', kind, 'yoy'),
         metricRate('recommendRoi', kind, 'pop'),
         metricRate('recommendRoi', kind, 'yoy'),
+        metricRate('recommendImpressions', kind, 'pop'),
+        metricRate('recommendImpressions', kind, 'yoy'),
+        metricRate('recommendClicks', kind, 'pop'),
+        metricRate('recommendClicks', kind, 'yoy'),
+        metricRate('recommendDetailVisits', kind, 'pop'),
+        metricRate('recommendDetailVisits', kind, 'yoy'),
       ])
     })
     return rows
@@ -774,11 +1037,12 @@
       sheet['!cols'] = [
         {wch: 6},
         {wch: 12}, {wch: 12}, {wch: 14}, {wch: 12},
-        {wch: 16}, {wch: 12}, {wch: 16},
+        {wch: 16}, {wch: 12}, {wch: 16}, {wch: 12}, {wch: 12}, {wch: 14},
         {wch: 14}, {wch: 14}, {wch: 16}, {wch: 16},
         {wch: 18}, {wch: 18}, {wch: 16}, {wch: 16},
         {wch: 20}, {wch: 20}, {wch: 14}, {wch: 14},
-        {wch: 20}, {wch: 20},
+        {wch: 20}, {wch: 20}, {wch: 14}, {wch: 14},
+        {wch: 14}, {wch: 14}, {wch: 18}, {wch: 18},
       ]
       const book = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(book, sheet, '汇总看板')
@@ -1224,22 +1488,19 @@
     if (!meta) return
     const prevStart = els.startDate.value
     const prevEnd = els.endDate.value
-    els.startDate.min = ymdToInput(meta.minDate)
-    els.startDate.max = ymdToInput(meta.maxDate)
-    els.endDate.min = ymdToInput(meta.minDate)
-    els.endDate.max = ymdToInput(meta.maxDate)
     if (preserveDates && prevStart && prevEnd) {
       els.startDate.value = prevStart
       els.endDate.value = prevEnd
     } else {
-      els.startDate.value = ymdToInput(meta.maxDate)
-      els.endDate.value = ymdToInput(meta.maxDate)
+      setHiddenRange(meta.maxDate, meta.maxDate)
+      dateMode = 'custom'
     }
     els.metaHint.textContent = `实时数据 ${ymdToInput(meta.minDate)} ~ ${ymdToInput(meta.maxDate)} · 大店 ${meta.fileCounts['大店']} · 小店 ${meta.fileCounts['小店']}`
     if (els.commitId && meta.commit) {
       els.commitId.textContent = meta.commit
       els.commitId.hidden = false
     }
+    setDateMode(dateMode, {rebuild: true})
   }
 
   async function runDeploy() {
@@ -1752,10 +2013,10 @@
   }
 
   function resetFilters() {
-    if (meta) {
-      els.startDate.value = ymdToInput(meta.maxDate)
-      els.endDate.value = ymdToInput(meta.maxDate)
+    if (meta?.maxDate) {
+      setHiddenRange(meta.maxDate, meta.maxDate)
     }
+    setDateMode('custom', {rebuild: true})
     els.spuid.value = ''
     els.sku.value = ''
     els.shop.value = ''
@@ -1799,15 +2060,12 @@
       console.warn('[pet] 初始化失败', err)
     }
 
-    // 点击整个日期框即可打开日历（前面需分号，避免 ASI 把上一行与 [ 粘成成员访问）
-    ;[els.startDate, els.endDate].forEach((input) => {
-      if (!input) return
-      input.addEventListener('click', () => {
-        if (typeof input.showPicker === 'function') {
-          try {input.showPicker()} catch (_) { /* ignore */}
-        }
+    if (els.dateMode) {
+      els.dateMode.addEventListener('change', () => {
+        setDateMode(els.dateMode.value, {rebuild: true})
       })
-    })
+    }
+    if (!datePicker) initDatePicker()
 
     els.searchBtn.addEventListener('click', runSearch)
     els.resetBtn.addEventListener('click', resetFilters)
@@ -1946,12 +2204,6 @@
     window.addEventListener('resize', hideCategoryPresetMenu)
     renderCategoryPresets()
 
-    els.startDate.addEventListener('change', () => {
-      updatePeriodHint()
-    })
-    els.endDate.addEventListener('change', () => {
-      updatePeriodHint()
-    })
     updatePeriodHint()
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {

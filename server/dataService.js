@@ -167,8 +167,8 @@ function expandSheetRef(sheet) {
 }
 
 /**
- * Compact promo rows: [ymd, spuid, cost, directPay]
- * @returns {Array<[string, string, number, number]>}
+ * Compact promo rows: [ymd, spuid, cost, directPay, impressions, clicks, detailVisits]
+ * @returns {Array<[string, string, number, number, number, number, number]>}
  */
 export function parsePromoXlsx(filePath, year) {
   const wb = XLSX.readFile(filePath, {cellDates: false, raw: false})
@@ -180,9 +180,10 @@ export function parsePromoXlsx(filePath, year) {
   const decoded = sheet['!ref'] ? XLSX.utils.decode_range(sheet['!ref']) : null
   if (decoded) maxR = decoded.e.r + 1
 
-  /** @type {Array<[string, string, number, number]>} */
+  /** @type {Array<[string, string, number, number, number, number, number]>} */
   const rows = []
   // Row1 notice, Row2 header, data from Row3
+  // H=消耗 P=直接支付金额 I=曝光 J=点击 X=商详访问数
   for (let excelRow = 3; excelRow <= maxR; excelRow++) {
     const md = sheet[`A${excelRow}`]?.v
     const spuidRaw = sheet[`G${excelRow}`]?.v
@@ -191,15 +192,25 @@ export function parsePromoXlsx(filePath, year) {
     const spuid = String(spuidRaw ?? '').trim()
     if (!ymd || !spuid) continue
     const cost = parseNumber(sheet[`H${excelRow}`]?.v)
+    const impressions = parseNumber(sheet[`I${excelRow}`]?.v)
+    const clicks = parseNumber(sheet[`J${excelRow}`]?.v)
     const directPay = parseNumber(sheet[`P${excelRow}`]?.v)
-    rows.push([ymd, spuid, cost, directPay])
+    const detailVisits = parseNumber(sheet[`X${excelRow}`]?.v)
+    rows.push([ymd, spuid, cost, directPay, impressions, clicks, detailVisits])
   }
   return rows
 }
 
 /**
  * Aggregate 得物推数据 by SPUID within [startDate, endDate].
- * @returns {Map<string, { recommendPayAmount: number, recommendCost: number, recommendRoi: number|null }>}
+ * @returns {Map<string, {
+ *   recommendPayAmount: number,
+ *   recommendCost: number,
+ *   recommendRoi: number|null,
+ *   recommendImpressions: number,
+ *   recommendClicks: number,
+ *   recommendDetailVisits: number,
+ * }>}
  */
 export async function aggregatePromoBySpuid(root, startDate, endDate, onProgress) {
   if (!startDate || !endDate) return new Map()
@@ -235,6 +246,9 @@ function attachPromoMetrics(detailRows, promoMap) {
       recommendPayAmount: promo ? promo.recommendPayAmount : 0,
       recommendCost: promo ? promo.recommendCost : 0,
       recommendRoi: promo ? promo.recommendRoi : null,
+      recommendImpressions: promo ? promo.recommendImpressions : 0,
+      recommendClicks: promo ? promo.recommendClicks : 0,
+      recommendDetailVisits: promo ? promo.recommendDetailVisits : 0,
     }
   })
 }
@@ -243,9 +257,15 @@ function attachPromoMetrics(detailRows, promoMap) {
 function sumPromoFromRows(rows) {
   let recommendPayAmount = 0
   let recommendCost = 0
+  let recommendImpressions = 0
+  let recommendClicks = 0
+  let recommendDetailVisits = 0
   for (const row of rows || []) {
     recommendPayAmount += Number(row.recommendPayAmount) || 0
     recommendCost += Number(row.recommendCost) || 0
+    recommendImpressions += Number(row.recommendImpressions) || 0
+    recommendClicks += Number(row.recommendClicks) || 0
+    recommendDetailVisits += Number(row.recommendDetailVisits) || 0
   }
   return {
     recommendPayAmount: {总和: round2(recommendPayAmount)},
@@ -253,6 +273,9 @@ function sumPromoFromRows(rows) {
     recommendRoi: {
       总和: recommendCost === 0 ? null : round2(recommendPayAmount / recommendCost),
     },
+    recommendImpressions: {总和: round2(recommendImpressions)},
+    recommendClicks: {总和: round2(recommendClicks)},
+    recommendDetailVisits: {总和: round2(recommendDetailVisits)},
   }
 }
 
@@ -996,6 +1019,9 @@ function attachRowCompare(rows, yoyRows, popRows) {
     'recommendPayAmount',
     'recommendCost',
     'recommendRoi',
+    'recommendImpressions',
+    'recommendClicks',
+    'recommendDetailVisits',
   ]
 
   return rows.map((row) => {

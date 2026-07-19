@@ -1,11 +1,10 @@
 /**
  * 页面宠物（l2d-widget）
  * 依赖全局 L2D_WIDGET.createWidget
- * 大屏放大 canvas 实际像素（清晰）+ 按模型校准 scale；无左侧悬浮菜单
+ * 固定右下角；模型加载失败/超时也会强制露出舞台，避免「一直没有宠物」
  */
 ; (() => {
   const STORAGE_KEY = 'dewu_pet_asleep'
-  const CREATE = typeof L2D_WIDGET !== 'undefined' ? L2D_WIDGET.createWidget : null
   const MODEL_CDN = 'https://model.hacxy.cn'
   const PAGE_MAX = 1180
   const BASE_W = 220
@@ -13,18 +12,17 @@
   const MAX_SCALE = 1.9
   const TRANSITION_MS = 900
   const TIP_DURATION_MS = 3800
+  const FORCE_SHOW_MS = 2500
 
-  /** @type {ReturnType<NonNullable<typeof CREATE>> | null} */
+  /** @type {any} */
   let widget = null
   let tipTimer = 0
   let resizeTimer = 0
+  let forceShowTimer = 0
   let modelIndex = 0
   let switching = false
+  let initTried = false
 
-  /**
-   * 仅开场欢迎语。messages 置空后组件仍会 clear 自带 hide 定时器，
-   * 因此开场结束后由 scheduleWelcomeHide 主动收起气泡。
-   */
   const tipsShared = {
     messages: [],
     duration: TIP_DURATION_MS,
@@ -42,16 +40,18 @@
     },
   }
 
-  /**
-   * 仅保留：黑猫、小春、bilibili 22/33
-   * scale 已按 Cubism2 / Cubism3 分别校准，大屏再乘 layoutScale
-   */
   const MODEL_DEFS = [
     {path: '/live2d/cat-black/model.json', scale: 0.16, welcome: ['黑猫报到～', '对账我盯着']},
     {path: '/live2d/koharu/model.json', scale: 0.24, welcome: ['小春好呀', '选好日期就可以开始啦']},
     {path: `${MODEL_CDN}/bilibili-22/index.json`, scale: 0.32, welcome: ['22 来啦', '哔哩哔哩～对账加油']},
     {path: `${MODEL_CDN}/bilibili-33/index.json`, scale: 0.32, welcome: ['33 报到', '换我上场啦']},
   ]
+
+  function getCreate() {
+    return typeof window.L2D_WIDGET !== 'undefined' && typeof window.L2D_WIDGET.createWidget === 'function'
+      ? window.L2D_WIDGET.createWidget
+      : null
+  }
 
   function model(def) {
     return {
@@ -74,8 +74,8 @@
   function computePetScale(gutter) {
     const edge = 8
     const usable = gutter - edge
-    if (usable < 72) return 0
-    return Math.min(MAX_SCALE, usable / BASE_W)
+    if (usable < 72) return 0.72
+    return Math.min(MAX_SCALE, Math.max(0.72, usable / BASE_W))
   }
 
   function petPixelSize(scale) {
@@ -87,9 +87,9 @@
   }
 
   function shouldEnable() {
-    if (!CREATE) return false
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return false
-    if (window.innerWidth < 1100) return false
+    if (!getCreate()) return false
+    // 窄屏不加载；不再因 prefers-reduced-motion 整宠禁用（Win 常开「减少动画」）
+    if (window.innerWidth < 720) return false
     return true
   }
 
@@ -105,18 +105,38 @@
   }
 
   function findStage() {
-    return document.querySelector('.dewu-pet-stage')
+    const marked = document.querySelector('.dewu-pet-stage')
+    if (marked) return marked
+    for (const el of document.body.children) {
+      if (!(el instanceof HTMLElement)) continue
+      if (el.querySelector(':scope > canvas')) {
+        el.classList.add('dewu-pet-stage')
+        return el
+      }
+    }
+    return null
   }
 
   function findStatus() {
-    return document.querySelector('.dewu-pet-status')
+    const marked = document.querySelector('.dewu-pet-status')
+    if (marked) return marked
+    for (const el of document.body.children) {
+      if (!(el instanceof HTMLElement)) continue
+      if (el.classList.contains('dewu-pet-stage')) continue
+      if (el.querySelector('canvas')) continue
+      const style = el.getAttribute('style') || ''
+      if (style.includes('z-index: 9998') || style.includes('z-index:9998')) {
+        el.classList.add('dewu-pet-status')
+        return el
+      }
+    }
+    return null
   }
 
   function currentBaseScale() {
     return MODEL_DEFS[modelIndex]?.scale ?? 0.2
   }
 
-  /** 各模型用自身基准 scale × 布局倍率，避免只有黑猫看起来变大 */
   function syncModelScale(layoutScale) {
     const l2d = widget?.l2d
     if (!l2d || typeof l2d.setScale !== 'function') return
@@ -133,7 +153,6 @@
     for (const el of stage.children) {
       if (!(el instanceof HTMLElement)) continue
       if (el.tagName === 'CANVAS') continue
-      // tips 在模型上方；菜单是侧栏空容器，直接隐藏
       const style = el.getAttribute('style') || ''
       if (style.includes('bottom: calc(100%') || style.includes('bottom:calc(100%')) continue
       el.style.display = 'none'
@@ -141,38 +160,35 @@
     }
   }
 
+  /** 组件默认 translateY(130%)，仅在 model loaded 后滑入；加载失败会一直藏着 */
+  function forceShowStage() {
+    const stage = findStage()
+    if (!(stage instanceof HTMLElement)) return false
+    stage.classList.add('dewu-pet-stage')
+    stage.style.transform = 'translateY(0)'
+    stage.style.opacity = '1'
+    stage.style.visibility = 'visible'
+    stage.style.pointerEvents = ''
+    stage.style.zIndex = '9999'
+    return true
+  }
+
   function pinToBottomRight() {
-    for (const el of document.body.children) {
-      if (!(el instanceof HTMLElement)) continue
-      if (el.querySelector(':scope > canvas')) {
-        el.classList.add('dewu-pet-stage')
-      }
-    }
+    findStage()
     window.setTimeout(() => {
-      for (const el of document.body.children) {
-        if (!(el instanceof HTMLElement)) continue
-        if (el.classList.contains('dewu-pet-stage')) continue
-        if (el.querySelector('canvas')) continue
-        const style = el.getAttribute('style') || ''
-        if (style.includes('z-index: 9998') || style.includes('z-index:9998')) {
-          el.classList.add('dewu-pet-status')
-        }
-      }
+      findStatus()
       hideMenuChrome()
       applyResponsivePet()
+      forceShowStage()
     }, 50)
   }
 
   function applyResponsivePet() {
     const scale = computePetScale(getGutter())
-    const visible = scale > 0
     const {width, height} = petPixelSize(scale)
 
     document.documentElement.style.setProperty('--dewu-pet-scale', String(scale || 0))
-    document.documentElement.style.setProperty(
-      '--dewu-pet-height',
-      visible ? `${height}px` : '0px',
-    )
+    document.documentElement.style.setProperty('--dewu-pet-height', `${height}px`)
 
     const stage = findStage()
     const status = findStatus()
@@ -181,24 +197,23 @@
       stage.style.zoom = ''
       stage.style.width = `${width}px`
       stage.style.height = `${height}px`
-      stage.style.visibility = visible ? 'visible' : 'hidden'
-      stage.style.pointerEvents = visible ? '' : 'none'
-      stage.setAttribute('data-pet-scale', visible ? scale.toFixed(2) : '0')
+      stage.style.visibility = 'visible'
+      stage.style.pointerEvents = ''
+      stage.style.transform = 'translateY(0)'
+      stage.style.opacity = '1'
+      stage.setAttribute('data-pet-scale', scale.toFixed(2))
     }
     if (status instanceof HTMLElement) {
       status.style.zoom = ''
-      status.style.visibility = visible ? '' : 'hidden'
+      status.style.visibility = ''
     }
 
     hideMenuChrome()
 
-    if (visible) {
-      requestAnimationFrame(() => {
-        syncModelScale(scale)
-        // Cubism3 切换后偶发需再补一次
-        window.setTimeout(() => syncModelScale(scale), 80)
-      })
-    }
+    requestAnimationFrame(() => {
+      syncModelScale(scale)
+      window.setTimeout(() => syncModelScale(scale), 80)
+    })
   }
 
   function findTipBubble() {
@@ -222,7 +237,6 @@
     }, 260)
   }
 
-  /** 开场语展示结束后收起（补偿组件 E() 清掉自带 hide 定时器） */
   function scheduleWelcomeHide() {
     window.clearTimeout(tipTimer)
     tipTimer = window.setTimeout(hideTipBubble, TRANSITION_MS + TIP_DURATION_MS)
@@ -230,8 +244,6 @@
 
   function say(text) {
     if (!text || !widget) return
-    const scale = computePetScale(getGutter())
-    if (scale <= 0) return
     const span = findTipsSpan()
     const bubble = findTipBubble()
     if (!span || !bubble) return
@@ -247,6 +259,7 @@
       window.clearTimeout(resizeTimer)
       resizeTimer = window.setTimeout(() => {
         applyResponsivePet()
+        forceShowStage()
       }, 120)
     })
   }
@@ -259,6 +272,7 @@
       await widget.switchModel(modelIndex)
       hideMenuChrome()
       applyResponsivePet()
+      forceShowStage()
       scheduleWelcomeHide()
     } catch (err) {
       console.warn('[pet] 切换模型失败', err)
@@ -278,16 +292,41 @@
     })
   }
 
+  function bindModelLoaded() {
+    const l2d = widget?.l2d
+    if (!l2d || typeof l2d.on !== 'function') return
+    l2d.on('loaded', () => {
+      forceShowStage()
+      applyResponsivePet()
+    })
+  }
+
   function init() {
-    if (widget || !shouldEnable()) return null
+    if (widget) return widget
+    if (!shouldEnable()) {
+      if (!getCreate()) {
+        console.warn('[pet] L2D_WIDGET.createWidget 不可用')
+      }
+      return null
+    }
+    if (initTried && !widget) {
+      // 允许短暂重试（脚本偶发未就绪）
+    }
+    initTried = true
+
+    const CREATE = getCreate()
+    if (!CREATE) return null
 
     const bootScale = computePetScale(getGutter())
-    const bootSize = petPixelSize(bootScale > 0 ? bootScale : 1)
-    const layoutBoost = bootScale > 0 ? bootScale : 1
+    const bootSize = petPixelSize(bootScale)
+    const layoutBoost = bootScale
     modelIndex = 0
 
     try {
-      // 创建时就把布局倍率写进各模型 scale，Cubism3 首帧也够大
+      localStorage.removeItem(STORAGE_KEY)
+    } catch (_) { /* ignore */ }
+
+    try {
       const models = MODEL_DEFS.map((def) => {
         const m = model(def)
         m.scale = def.scale * layoutBoost
@@ -301,7 +340,6 @@
         transitionDuration: TRANSITION_MS,
         transitionType: 'slide',
         model: models,
-        // 空 items：不展示切换/休眠/About 等左侧悬浮菜单
         menus: {
           items: [],
         },
@@ -309,29 +347,30 @@
 
       pinToBottomRight()
       applyResponsivePet()
+      forceShowStage()
       bindResize()
+      bindModelLoaded()
       scheduleWelcomeHide()
       window.setTimeout(bindCanvasCycle, 100)
 
-      try {
-        if (localStorage.getItem(STORAGE_KEY) === '1') {
-          window.setTimeout(() => widget?.sleep(), 1200)
+      window.clearTimeout(forceShowTimer)
+      forceShowTimer = window.setTimeout(() => {
+        if (!forceShowStage()) {
+          console.warn('[pet] 舞台未找到，模型可能加载失败')
+        } else {
+          applyResponsivePet()
         }
-      } catch (_) {}
+      }, FORCE_SHOW_MS)
 
-      document.body.addEventListener(
-        'click',
-        (e) => {
-          const t = e.target
-          if (!(t instanceof Element)) return
-          if ((t.textContent || '').includes('正在休息')) {
-            try {
-              localStorage.removeItem(STORAGE_KEY)
-            } catch (_) {}
-          }
-        },
-        true,
-      )
+      // 再补几次，覆盖异步挂载 canvas 的情况
+      ;[200, 600, 1200].forEach((ms) => {
+        window.setTimeout(() => {
+          findStage()
+          forceShowStage()
+          applyResponsivePet()
+          bindCanvasCycle()
+        }, ms)
+      })
 
       return widget
     } catch (err) {
@@ -347,11 +386,25 @@
     sleep() {
       try {
         localStorage.setItem(STORAGE_KEY, '1')
-      } catch (_) {}
+      } catch (_) { /* ignore */ }
       widget?.sleep()
     },
     get widget() {
       return widget
     },
+  }
+
+  // 不依赖 app.js 时序：脚本就绪后自行拉起
+  function boot() {
+    try {
+      init()
+    } catch (err) {
+      console.warn('[pet] 自动初始化失败', err)
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot, {once: true})
+  } else {
+    boot()
   }
 })()

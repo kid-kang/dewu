@@ -36,6 +36,7 @@ const TABLES = [
   },
   {
     name: 'promo_daily',
+    // 旧 SQLite 仅有这 4 列；曝光/点击/商详由 openDb 补列后默认为 0，需重导得物推 xlsx
     columns: ['date', 'spuid', 'cost', 'direct_pay'],
   },
   {
