@@ -2,7 +2,7 @@ FROM node:22-alpine
 
 # Alpine 换阿里云源；sshd 给人登容器，openssh-client 给 git@github 拉代码
 RUN sed -i 's#https\?://dl-cdn.alpinelinux.org#https://mirrors.aliyun.com#g' /etc/apk/repositories \
-  && apk add --no-cache git openssh-server openssh-client \
+  && apk add --no-cache git openssh-server openssh-sftp-server openssh-client \
   && ssh-keygen -A \
   && mkdir -p /var/run/sshd /app /root/.ssh \
   && ssh-keyscan -t ed25519,rsa github.com >> /etc/ssh/ssh_known_hosts \
