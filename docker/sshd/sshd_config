@@ -15,6 +15,6 @@ PermitEmptyPasswords no
 X11Forwarding no
 PrintMotd no
 AcceptEnv LANG LC_*
-Subsystem sftp /usr/lib/ssh/sftp-server
+Subsystem sftp /usr/lib/ssh/sftp-server -d /app
 ClientAliveInterval 60
 ClientAliveCountMax 3

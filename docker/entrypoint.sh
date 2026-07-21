@@ -22,6 +22,11 @@ if [ -d /ssh-config ]; then
   done
 fi
 
+# SSH 登录后默认进入 /app（不改 HOME，保留 /root/.ssh 给 git）
+if ! grep -qxF 'cd /app' /root/.profile 2>/dev/null; then
+  echo 'cd /app' >> /root/.profile
+fi
+
 mkdir -p /var/run/sshd
 /usr/sbin/sshd
 
